@@ -9,7 +9,7 @@ jobs:
   verify-and-build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,9 +28,18 @@ jobs:
       - name: Verify (tests) then build debug APK
         run: gradle testDebugUnitTest assembleDebug --no-daemon --stacktrace
 
-      - name: Upload debug APK
+      - name: Upload debug APK to artifact
         uses: actions/upload-artifact@v4
         with:
           name: agentt-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish direct APK to continuous release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          name: Continuous Build
+          body: 每次 main 分支构建自动更新的 APK（直接下载，无需解压）
+          files: app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
