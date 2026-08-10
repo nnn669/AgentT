@@ -1,72 +1,56 @@
 package com.agentt.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+// iOS 风格输入框（参照 TIN ios_form_text_field：圆角、浅灰填充、无边框）
 @Composable
 fun IosTextField(
     value: String,
     onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
     modifier: Modifier = Modifier,
-    placeholder: String = "",
-    label: String = "",
-    singleLine: Boolean = true,
-    imeAction: ImeAction = ImeAction.Done,
-    onImeAction: () -> Unit = {}
+    singleLine: Boolean = true
 ) {
-    val shape = RoundedCornerShape(10.dp)
-    val backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    val isDark = isSystemInDarkTheme()
+    val cs = MaterialTheme.colorScheme
+    val bg = if (isDark) Color.White.copy(alpha = 0.10f) else Color(0xFFF2F3F5)
 
-    Column(modifier = modifier) {
-        if (label.isNotEmpty()) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        placeholder = {
+            Text(
+                text = placeholder,
+                fontSize = 14.sp,
+                color = cs.onSurface.copy(alpha = 0.4f)
+            )
+        },
+        label = {
             Text(
                 text = label,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(bottom = 6.dp)
+                fontSize = 14.sp,
+                color = cs.onSurface.copy(alpha = 0.6f)
             )
-        }
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = {
-                if (placeholder.isNotEmpty()) {
-                    Text(
-                        text = placeholder,
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                    )
-                }
-            },
-            singleLine = singleLine,
-            shape = shape,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                focusedContainerColor = backgroundColor,
-                unfocusedContainerColor = backgroundColor
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = imeAction),
-            keyboardActions = KeyboardActions(
-                onDone = { onImeAction() }
-            ),
-            textStyle = LocalTextStyle.current.copy(
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        )
-    }
+        },
+        singleLine = singleLine,
+        shape = RoundedCornerShape(10.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = bg,
+            unfocusedContainerColor = bg,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            disabledIndicatorColor = Color.Transparent
+        ),
+        textStyle = LocalTextStyle.current.copy(fontSize = 15.sp)
+    )
 }
