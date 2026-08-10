@@ -1,8 +1,8 @@
 package com.agentt.ui.chat
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.sp
 import com.agentt.data.model.ChatSession
 import com.agentt.viewmodel.ChatViewModel
 
-// 会话列表（参照 TIN ChatHistoryPage：圆角卡片、搜索框、Pin 胶囊按钮）
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(
@@ -35,43 +34,26 @@ fun ChatListScreen(
     val isDark = isSystemInDarkTheme()
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-
-    val filtered = if (query.isBlank()) sessions
-        else sessions.filter { it.title.contains(query, ignoreCase = true) }
+    val filtered = sessions.filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = "聊天",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 18.sp
-                    )
-                },
+                title = { Text("聊天", fontWeight = FontWeight.SemiBold, fontSize = 18.sp) },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "菜单",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                        Icon(Icons.Default.Menu, contentDescription = "菜单")
                     }
                 },
                 actions = {
                     IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
                         Icon(
-                            imageVector = if (searching) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = if (searching) "取消" else "搜索",
-                            tint = MaterialTheme.colorScheme.onSurface
+                            if (searching) Icons.Default.Close else Icons.Default.Search,
+                            contentDescription = if (searching) "关闭搜索" else "搜索"
                         )
                     }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "设置",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                        Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -81,97 +63,62 @@ fun ChatListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { viewModel.createSession() },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = CircleShape
+                onClick = viewModel::createSession,
+                shape = CircleShape,
+                containerColor = MaterialTheme.colorScheme.primary
             ) {
-                Icon(imageVector = Icons.Default.Edit, contentDescription = "新对话")
+                Icon(Icons.Default.Edit, contentDescription = "新对话")
             }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            // 搜索框（胶囊形，参照 TIN）
+        Column(Modifier.fillMaxSize().padding(padding)) {
             AnimatedVisibility(
                 visible = searching,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut()
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    val bg = if (isDark) Color.White.copy(alpha = 0.10f) else Color(0xFFF2F3F5)
-                    TextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(40.dp),
-                        placeholder = {
-                            Text(
-                                "搜索聊天记录…",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                            )
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(50),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = bg,
-                            unfocusedContainerColor = bg,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        ),
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
-                        }
+                val searchColor = if (isDark) Color.White.copy(alpha = 0.10f) else Color(0xFFF2F3F5)
+                TextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    placeholder = { Text("搜索聊天记录…", fontSize = 14.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(50.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = searchColor,
+                        unfocusedContainerColor = searchColor,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
                     )
-                }
+                )
             }
 
             if (filtered.isEmpty()) {
-                // 空状态
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector = Icons.Default.Chat,
+                            Icons.Default.Chat,
                             contentDescription = null,
-                            modifier = Modifier.size(64.dp),
+                            modifier = Modifier.size(56.dp),
                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(Modifier.height(14.dp))
+                        Text("暂无对话", fontSize = 17.sp)
+                        Spacer(Modifier.height(6.dp))
                         Text(
-                            text = if (query.isBlank()) "暂无对话" else "未找到结果",
-                            fontSize = 17.sp,
+                            "点击右下角按钮开始新对话",
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = if (query.isBlank()) "点击右下角按钮开始新对话" else "换个关键词试试",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
                         )
                     }
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(filtered, key = { it.id }) { session ->
                         SessionCard(
@@ -186,114 +133,48 @@ fun ChatListScreen(
     }
 }
 
-// 会话卡片（参照 TIN _ConversationCard：圆角14、浅灰底、1px边框、32dp圆形图标）
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SessionCard(
-    session: ChatSession,
-    onClick: () -> Unit,
-    onDelete: () -> Unit
-) {
+private fun SessionCard(session: ChatSession, onClick: () -> Unit, onDelete: () -> Unit) {
     val isDark = isSystemInDarkTheme()
     val cs = MaterialTheme.colorScheme
     val bg = if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFF7F7F9)
-    val border = cs.outlineVariant.copy(alpha = 0.16f)
 
-    val dismissState = rememberDismissState()
-
-    SwipeToDismiss(
-        state = dismissState,
-        directions = setOf(DismissDirection.EndToStart),
-        background = {
+    // 本轮先保留 TIN 卡片视觉；删除动作通过长按/后续菜单接入，避免引入版本差异的滑动 API。
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = bg,
+        border = BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.16f))
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(vertical = 6.dp)
-                    .background(cs.errorContainer, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 16.dp),
-                contentAlignment = Alignment.CenterEnd
+                Modifier.size(32.dp).background(cs.primary.copy(alpha = 0.10f), CircleShape),
+                contentAlignment = Alignment.Center
             ) {
+                Icon(Icons.Default.Message, contentDescription = null, modifier = Modifier.size(18.dp), tint = cs.primary)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    session.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "删除",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = cs.onErrorContainer
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = cs.onErrorContainer
-                    )
+                    Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(13.dp), tint = cs.onSurface.copy(alpha = 0.5f))
+                    Spacer(Modifier.width(4.dp))
+                    Text(formatTime(session.updatedAt), fontSize = 12.sp, color = cs.onSurface.copy(alpha = 0.6f))
                 }
             }
-        },
-        onDismiss = { onDelete() }
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp)
-        ) {
-            Surface(
-                onClick = onClick,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = bg,
-                border = androidx.compose.foundation.BorderStroke(1.dp, border)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // 圆形图标容器
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(cs.primary.copy(alpha = 0.10f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Message,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = cs.primary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    // 标题 + 时间
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = session.title,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp),
-                                tint = cs.onSurface.copy(alpha = 0.5f)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = formatTime(session.updatedAt),
-                                fontSize = 12.sp,
-                                color = cs.onSurface.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.DeleteOutline, contentDescription = "删除", tint = cs.onSurface.copy(alpha = 0.45f))
             }
         }
     }
@@ -303,8 +184,8 @@ private fun formatTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
     return when {
         diff < 60_000 -> "刚刚"
-        diff < 3600_000 -> "${diff / 60_000}分钟前"
-        diff < 86400_000 -> "${diff / 3600_000}小时前"
-        else -> "${diff / 86400_000}天前"
+        diff < 3_600_000 -> "${diff / 60_000}分钟前"
+        diff < 86_400_000 -> "${diff / 3_600_000}小时前"
+        else -> "${diff / 86_400_000}天前"
     }
 }
