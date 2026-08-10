@@ -18,10 +18,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.agentt.app.ui.providers.ProvidersScreen
 import com.agentt.app.ui.settings.SettingsDrawer
 import com.agentt.app.ui.theme.AgentTTheme
 import com.agentt.app.ui.workspace.WorkspaceScreen
 import kotlinx.coroutines.launch
+
+enum class Screen { Workspace, Providers }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,10 +37,15 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppRoot(
-                        darkTheme = darkTheme,
-                        onToggleDarkTheme = { darkTheme = !darkTheme }
-                    )
+                    var screen by rememberSaveable { mutableStateOf(Screen.Workspace) }
+                    when (screen) {
+                        Screen.Workspace -> AppRoot(
+                            darkTheme = darkTheme,
+                            onToggleDarkTheme = { darkTheme = !darkTheme },
+                            onOpenProviders = { screen = Screen.Providers }
+                        )
+                        Screen.Providers -> ProvidersScreen(onBack = { screen = Screen.Workspace })
+                    }
                 }
             }
         }
@@ -46,7 +54,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppRoot(darkTheme: Boolean, onToggleDarkTheme: () -> Unit) {
+fun AppRoot(
+    darkTheme: Boolean,
+    onToggleDarkTheme: () -> Unit,
+    onOpenProviders: () -> Unit
+) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     ModalNavigationDrawer(
@@ -54,12 +66,14 @@ fun AppRoot(darkTheme: Boolean, onToggleDarkTheme: () -> Unit) {
         drawerContent = {
             SettingsDrawer(
                 darkTheme = darkTheme,
-                onToggleDarkTheme = onToggleDarkTheme
+                onToggleDarkTheme = onToggleDarkTheme,
+                onOpenProviders = {
+                    scope.launch { drawerState.close() }
+                    onOpenProviders()
+                }
             )
         }
     ) {
-        WorkspaceScreen(onOpenSettings = {
-            scope.launch { drawerState.open() }
-        })
+        WorkspaceScreen(onOpenSettings = { scope.launch { drawerState.open() } })
     }
 }

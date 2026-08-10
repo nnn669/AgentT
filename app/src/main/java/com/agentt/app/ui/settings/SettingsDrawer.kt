@@ -14,18 +14,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Face
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.ListAlt
-import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Storage
@@ -52,185 +45,68 @@ import androidx.compose.ui.unit.dp
 fun SettingsDrawer(
     darkTheme: Boolean,
     onToggleDarkTheme: () -> Unit,
-    modifier: Modifier = Modifier,
+    onOpenProviders: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     ModalDrawerSheet(modifier = modifier.fillMaxWidth(0.86f)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center,
+                contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "A",
+                    "A",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Bold
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(Modifier.width(12.dp))
             Column {
                 Text(
-                    text = "AgentT",
+                    "AgentT",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "原生 Android Agent 应用",
+                    "原生 Android Agent 应用",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
         LazyColumn(modifier = Modifier.weight(1f)) {
             item { SectionHeader("模型与服务") }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Dns,
-                    title = "供应商",
-                    subtitle = "管理 API 供应商与密钥",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.SmartToy,
-                    title = "默认模型",
-                    subtitle = "选择默认对话模型",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Search,
-                    title = "搜索服务",
-                    subtitle = "配置联网搜索",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.RecordVoiceOver,
-                    title = "语音服务",
-                    subtitle = "语音合成与识别",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Extension,
-                    title = "MCP",
-                    subtitle = "模型上下文协议服务",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Bolt,
-                    title = "快捷短语",
-                    subtitle = "常用回复快捷输入",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Code,
-                    title = "指令注入",
-                    subtitle = "自定义系统指令",
-                    onClick = {},
-                )
-            }
+            item { SettingRow(Icons.Outlined.Dns, "供应商", "管理 API 供应商与密钥", onOpenProviders) }
+            item { SettingRow(Icons.Outlined.SmartToy, "默认模型", "选择默认对话模型", {}) }
+            item { SettingRow(Icons.Outlined.Search, "搜索服务", "配置联网搜索", {}) }
+            item { SettingRow(Icons.Outlined.Extension, "MCP", "模型上下文协议服务", {}) }
 
             item { SectionHeader("通用设置") }
+            item { SettingRow(Icons.Outlined.Tune, "偏好设置", "外观、行为与交互偏好", {}) }
+            item { SettingRow(Icons.Outlined.Face, "助手", "默认助手与对话风格", {}) }
             item {
                 SettingRow(
-                    icon = Icons.Outlined.Tune,
-                    title = "偏好设置",
-                    subtitle = "外观、行为与交互偏好",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Face,
-                    title = "助手",
-                    subtitle = "默认助手与对话风格",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.DarkMode,
-                    title = "颜色模式",
-                    subtitle = if (darkTheme) "深色" else "浅色",
-                    onClick = onToggleDarkTheme,
+                    Icons.Outlined.DarkMode, "颜色模式", if (darkTheme) "深色" else "浅色",
+                    onToggleDarkTheme,
                     trailing = {
                         Switch(checked = darkTheme, onCheckedChange = { onToggleDarkTheme() })
-                    },
+                    }
                 )
             }
 
             item { SectionHeader("数据设置") }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Backup,
-                    title = "数据备份",
-                    subtitle = "备份与恢复聊天记录",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Storage,
-                    title = "聊天记录存储",
-                    subtitle = "存储位置与空间管理",
-                    onClick = {},
-                )
-            }
-
-            item { SectionHeader("关于") }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.Info,
-                    title = "关于",
-                    subtitle = "版本与许可",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.BarChart,
-                    title = "统计",
-                    subtitle = "对话与用量统计",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.MenuBook,
-                    title = "使用文档",
-                    subtitle = "查看使用说明",
-                    onClick = {},
-                )
-            }
-            item {
-                SettingRow(
-                    icon = Icons.Outlined.ListAlt,
-                    title = "日志",
-                    subtitle = "查看运行日志",
-                    onClick = {},
-                )
-            }
-            item { Spacer(modifier = Modifier.height(24.dp)) }
+            item { SettingRow(Icons.Outlined.Backup, "数据备份", "备份与恢复聊天记录", {}) }
+            item { SettingRow(Icons.Outlined.Storage, "聊天记录存储", "存储位置与空间管理", {}) }
         }
     }
 }
@@ -241,29 +117,23 @@ private fun SettingRow(
     title: String,
     subtitle: String? = null,
     onClick: () -> Unit,
-    trailing: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null
 ) {
     Surface(onClick = onClick, color = Color.Transparent) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge)
                 if (subtitle != null) {
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        text = subtitle,
+                        subtitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -271,9 +141,9 @@ private fun SettingRow(
                 trailing()
             } else {
                 Icon(
-                    imageVector = Icons.Outlined.ChevronRight,
+                    Icons.Outlined.ChevronRight,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
         }
@@ -286,6 +156,6 @@ private fun SectionHeader(title: String) {
         text = title,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp),
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp)
     )
 }
