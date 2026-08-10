@@ -2,6 +2,7 @@ package com.agentt.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.agentt.core.api.ApiFactory
 import com.agentt.data.model.*
 import com.agentt.data.repository.ChatRepository
 import kotlinx.coroutines.flow.*
@@ -37,6 +38,10 @@ class ChatViewModel : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // 错误提示消息
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
     // 选择会话
     fun selectSession(sessionId: String) {
         _selectedSessionId.value = sessionId
@@ -56,7 +61,12 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    // 发送消息
+    // 清除提示消息
+    fun clearMessage() {
+        _message.value = null
+    }
+
+    // 发送消息（调用真实 AI API）
     fun sendMessage(content: String) {
         val sessionId = _selectedSessionId.value ?: return
         if (content.isBlank()) return
@@ -68,17 +78,72 @@ class ChatViewModel : ViewModel() {
         )
         repository.addMessage(sessionId, userMessage)
 
-        // 模拟 AI 回复
         _isLoading.value = true
         viewModelScope.launch {
-            kotlinx.coroutines.delay(1000)
-            val aiMessage = Message(
-                sessionId = sessionId,
-                role = MessageRole.ASSISTANT,
-                content = "你好！我是 AgentT AI 助手。你刚才说：\"$content\"\n\n目前我正处于开发阶段，完整功能即将上线。"
-            )
-            repository.addMessage(sessionId, aiMessage)
-            _isLoading.value = false
+            try {
+                // 获取可用的供应商
+                val provider = repository.providers.value.firstOrNull { it.isEnabled }
+                if (provider == null) {
+                    _message.value = "请先在左侧抽屉中添加 AI 供应商"
+                    repository.addMessage(
+                        sessionId,
+                        Message(
+                            sessionId = sessionId,
+                            role = MessageRole.ASSISTANT,
+                            content = "⚠️ 还没有配置 AI 供应商\n\n请点击左上角菜单 → 添加供应商，填入 API Key 后即可开始对话。"
+                        )
+                    )
+                    return@launch
+                }
+
+                // 校验 API Key
+                if (provider.apiKey.isBlank()) {
+                    _message.value = "供应商 ${provider.name} 的 API Key 未填写"
+                    repository.addMessage(
+                        sessionId,
+                        Message(
+                            sessionId = sessionId,
+                            role = MessageRole.ASSISTANT,
+                            content = "⚠️ 供应商 \"${provider.name}\" 还没有填写 API Key\n\n请到左侧抽屉中编辑该供应商，填入 API Key 后再试。"
+                        )
+                    )
+                    return@launch
+                }
+
+                // 调用真实 API
+                val client = ApiFactory.createClient(provider.type)
+                val history = repository.getMessages(sessionId).value
+                val model = provider.models.firstOrNull() ?: "gpt-4o"
+
+                val reply = client.chatCompletion(
+                    apiKey = provider.apiKey,
+                    baseUrl = provider.baseUrl,
+                    model = model,
+                    messages = history
+                )
+
+                repository.addMessage(
+                    sessionId,
+                    Message(
+                        sessionId = sessionId,
+                        role = MessageRole.ASSISTANT,
+                        content = reply
+                    )
+                )
+            } catch (e: Exception) {
+                val errMsg = e.message?.take(300) ?: "未知错误"
+                _message.value = "调用 AI 失败"
+                repository.addMessage(
+                    sessionId,
+                    Message(
+                        sessionId = sessionId,
+                        role = MessageRole.ASSISTANT,
+                        content = "⚠️ 调用 AI 失败：\n\n$errMsg"
+                    )
+                )
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
