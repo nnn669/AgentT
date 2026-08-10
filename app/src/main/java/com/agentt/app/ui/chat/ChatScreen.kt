@@ -164,7 +164,7 @@ fun ChatScreen(
 
     LaunchedEffect(sessionId) {
         messages.clear()
-        messages.addAll(chatStore.loadMessages(sessionId))
+        if (sessionId != null) messages.addAll(chatStore.loadMessages(sessionId))
         loading = false
     }
 
