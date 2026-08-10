@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentt.data.model.AIProvider
 import com.agentt.data.model.ProviderType
+import com.agentt.data.model.defaultModels
 import com.agentt.ui.components.IosButton
 import com.agentt.ui.components.IosTextField
 import com.agentt.ui.theme.*
@@ -200,6 +201,7 @@ private fun ProviderItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddProviderDialog(
     onDismiss: () -> Unit,
@@ -306,7 +308,7 @@ private fun providerColor(type: ProviderType): Color = when (type) {
 private fun providerIcon(type: ProviderType) = when (type) {
     ProviderType.ANTHROPIC -> Icons.Default.Psychology
     ProviderType.OPEN_AI -> Icons.Default.AutoAwesome
-    ProviderType.GOOGLE -> Icons.Default.Google
+    ProviderType.GOOGLE -> Icons.Default.Cloud
     ProviderType.OPEN_ROUTER -> Icons.Default.Hub
     ProviderType.CUSTOM -> Icons.Default.Dns
 }

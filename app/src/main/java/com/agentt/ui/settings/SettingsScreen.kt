@@ -65,7 +65,7 @@ fun SettingsScreen(
                     label = "深色模式",
                     description = "跟随系统深色模式"
                 )
-                HorizontalDivider(
+                Divider(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                 )
@@ -87,7 +87,7 @@ fun SettingsScreen(
                     subtitle = "删除所有聊天记录",
                     onClick = { }
                 )
-                HorizontalDivider(
+                Divider(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                 )
