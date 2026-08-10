@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                         )
                         Screen.Chat -> ChatScreen(
                             title = chatTitle,
+                            sessionId = chatSessionId,
                             onBack = { screen = Screen.Workspace },
                             onNewChat = {
                                 val s = createChatSession(ChatStore.from(this@MainActivity))

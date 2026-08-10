@@ -15,6 +15,13 @@ data class ChatSession(
     val updatedAt: Long
 )
 
+data class ChatMessage(
+    val id: String,
+    val role: String,
+    val content: String,
+    val model: String? = null
+)
+
 class ChatStore(private val prefs: SharedPreferences) {
 
     fun loadCategories(): List<ChatCategory> {
@@ -74,9 +81,46 @@ class ChatStore(private val prefs: SharedPreferences) {
         prefs.edit().putString(KEY_SESSIONS, arr.toString()).apply()
     }
 
+    fun loadMessages(sessionId: String): List<ChatMessage> {
+        val raw = prefs.getString(KEY_MSG_PREFIX + sessionId, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    add(
+                        ChatMessage(
+                            id = o.optString("id"),
+                            role = o.optString("role"),
+                            content = o.optString("content"),
+                            model = o.optString("model").ifBlank { null }
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveMessages(sessionId: String, list: List<ChatMessage>) {
+        val arr = JSONArray()
+        list.forEach {
+            arr.put(
+                JSONObject()
+                    .put("id", it.id)
+                    .put("role", it.role)
+                    .put("content", it.content)
+                    .put("model", it.model ?: JSONObject.NULL)
+            )
+        }
+        prefs.edit().putString(KEY_MSG_PREFIX + sessionId, arr.toString()).apply()
+    }
+
     companion object {
         private const val KEY_CATEGORIES = "chat_categories"
         private const val KEY_SESSIONS = "chat_sessions"
+        private const val KEY_MSG_PREFIX = "chat_msgs_"
         fun from(context: Context): ChatStore =
             ChatStore(context.getSharedPreferences("agentt_chat", Context.MODE_PRIVATE))
     }
