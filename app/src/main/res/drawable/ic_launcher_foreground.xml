@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 背景圆角矩形 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 L54,20 C64,20 74,24 81,31 C88,38 92,48 92,58 C92,68 88,78 81,85 C74,92 64,96 54,96 C44,96 34,92 27,85 C20,78 16,68 16,58 C16,48 20,38 27,31 C34,24 44,20 54,20Z"/>
+    <!-- 聊天气泡图标 -->
+    <path
+        android:fillColor="#007AFF"
+        android:pathData="M38,42 L70,42 C73.3,42 76,44.7 76,48 L76,64 C76,67.3 73.3,70 70,70 L58,70 L50,78 L50,70 L38,70 C34.7,70 32,67.3 32,64 L32,48 C32,44.7 34.7,42 38,42Z"/>
+    <!-- AI 小点 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,55 L55,55 M45,61 L55,61 M62,55 L63,55 M62,61 L63,61"/>
+</vector>
