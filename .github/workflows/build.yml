@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -36,3 +39,29 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           compression-level: 0
           retention-days: 30
+
+      - name: 发布 Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/debug/app-debug.apk
+          tag_name: v1.0.0
+          name: AgentT v1.0.0 测试版
+          body: |
+            ## 🎉 AgentT 首个测试版
+
+            ### ✨ 功能
+            - 💬 聊天会话列表（主界面）
+            - 📡 左侧抽屉：AI 供应商管理（OpenAI / Claude / Gemini / OpenRouter / 自定义）
+            - ⚙️ 右侧抽屉：设置页面
+            - 🗨️ 聊天对话界面
+            - 🔌 真实 AI API 调用
+
+            ### 📥 安装
+            下载 `app-debug.apk` 直接安装即可
+
+            ### ⚠️ 使用提示
+            打开 App 后 → 左侧菜单 → 添加供应商 → 填入 API Key → 即可开始对话
+          generate_release_notes: false
+          make_latest: true
+          fail_on_unmatched_files: true
