@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -22,7 +23,6 @@ import com.agentt.data.model.Message
 import com.agentt.data.model.MessageRole
 import com.agentt.viewmodel.ChatViewModel
 
-// 聊天窗口（TIN 风格：气泡式对话、胶囊输入框）
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -36,11 +36,8 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    // 自动滚动到底部
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size)
-        }
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
     Scaffold(
@@ -55,20 +52,12 @@ fun ChatScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "返回",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
                     IconButton(onClick = onOpenDrawer) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "菜单",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                        Icon(Icons.Default.Menu, contentDescription = "菜单")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -77,7 +66,6 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            // 输入区域（胶囊输入框 + 圆形发送按钮）
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.background
@@ -90,58 +78,45 @@ fun ChatScreen(
                     verticalAlignment = Alignment.Bottom
                 ) {
                     val isDark = isSystemInDarkTheme()
-                    val bg = if (isDark) Color.White.copy(alpha = 0.10f) else Color(0xFFF2F3F5)
-
+                    val inputColor = if (isDark) {
+                        Color.White.copy(alpha = 0.10f)
+                    } else {
+                        Color(0xFFF2F3F5)
+                    }
                     TextField(
                         value = inputText,
                         onValueChange = { inputText = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = {
-                            Text(
-                                "输入消息…",
-                                fontSize = 15.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                            )
-                        },
+                        placeholder = { Text("输入消息…", fontSize = 15.sp) },
                         shape = RoundedCornerShape(22.dp),
+                        maxLines = 4,
                         colors = TextFieldDefaults.colors(
-                            focusedContainerColor = bg,
-                            unfocusedContainerColor = bg,
+                            focusedContainerColor = inputColor,
+                            unfocusedContainerColor = inputColor,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent
-                        ),
-                        textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
-                        maxLines = 4
+                        )
                     )
-
                     Spacer(modifier = Modifier.width(8.dp))
-
                     FilledIconButton(
                         onClick = {
-                            if (inputText.isNotBlank() && !isLoading) {
-                                viewModel.sendMessage(inputText.trim())
+                            val text = inputText.trim()
+                            if (text.isNotEmpty() && !isLoading) {
+                                viewModel.sendMessage(text)
                                 inputText = ""
                             }
                         },
                         enabled = !isLoading,
                         modifier = Modifier.size(44.dp),
-                        shape = RoundedCornerShape(22.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
+                        shape = CircleShape
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Icon(
-                                imageVector = Icons.Default.Send,
-                                contentDescription = "发送",
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Icon(Icons.Default.Send, contentDescription = "发送")
                         }
                     }
                 }
@@ -150,100 +125,67 @@ fun ChatScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         if (messages.isEmpty()) {
-            // 空聊天界面
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
                         modifier = Modifier
                             .size(64.dp)
-                            .background(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
-                                CircleShape
-                            ),
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.SmartToy,
+                            Icons.Default.SmartToy,
                             contentDescription = null,
                             modifier = Modifier.size(32.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "开始对话吧",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
+                    Text("开始对话吧", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "在下方输入消息，AI 会回复你",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                        "在下方输入消息，AI 会回复你",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                     )
                 }
             }
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(messages, key = { it.id }) { message ->
-                    MessageBubble(message = message)
-                }
+                items(messages, key = { it.id }) { MessageBubble(it) }
             }
         }
     }
 }
 
-// 聊天气泡（TIN 风格：用户 primary 右侧圆角气泡，AI 浅灰左侧气泡）
 @Composable
 private fun MessageBubble(message: Message) {
     val isUser = message.role == MessageRole.USER
     val isDark = isSystemInDarkTheme()
     val cs = MaterialTheme.colorScheme
+    val bubbleColor = if (isUser) cs.primary
+    else if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFF7F7F9)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom
     ) {
         if (!isUser) {
-            // AI 头像（圆形图标容器）
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .background(cs.primary.copy(alpha = 0.10f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SmartToy,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = cs.primary
-                )
-            }
+            AvatarIcon(Icons.Default.SmartToy, cs.primary.copy(alpha = 0.10f), cs.primary)
             Spacer(modifier = Modifier.width(8.dp))
         }
-
-        // 气泡
-        val bubbleColor = if (isUser) cs.primary
-            else if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFF7F7F9)
-        val textColor = if (isUser) cs.onPrimary
-            else cs.onSurface.copy(alpha = 0.92f)
-
-        Column(
+        Text(
+            text = message.content,
             modifier = Modifier
-                .widthIn(max = 280.dp)
+                .widthIn(max = 300.dp)
                 .clip(
                     RoundedCornerShape(
                         topStart = 18.dp,
@@ -253,32 +195,28 @@ private fun MessageBubble(message: Message) {
                     )
                 )
                 .background(bubbleColor)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            Text(
-                text = message.content,
-                fontSize = 15.sp,
-                color = textColor,
-                lineHeight = 21.sp
-            )
-        }
-
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            fontSize = 15.sp,
+            lineHeight = 21.sp,
+            color = if (isUser) cs.onPrimary else cs.onSurface
+        )
         if (isUser) {
             Spacer(modifier = Modifier.width(8.dp))
-            // 用户头像
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .background(cs.primary, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = cs.onPrimary
-                )
-            }
+            AvatarIcon(Icons.Default.Person, cs.primary, cs.onPrimary)
         }
+    }
+}
+
+@Composable
+private fun AvatarIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    background: Color,
+    tint: Color
+) {
+    Box(
+        modifier = Modifier.size(30.dp).background(background, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = tint)
     }
 }

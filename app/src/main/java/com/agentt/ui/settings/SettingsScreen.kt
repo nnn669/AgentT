@@ -1,6 +1,8 @@
 package com.agentt.ui.settings
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -19,33 +23,22 @@ import com.agentt.viewmodel.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(
-    viewModel: ChatViewModel,
-    onClose: () -> Unit
-) {
-    var darkMode by remember { mutableStateOf(false) }
-    var icloudSync by remember { mutableStateOf(false) }
+fun SettingsScreen(viewModel: ChatViewModel, onClose: () -> Unit) {
+    var followSystem by remember { mutableStateOf(true) }
+    var compactMode by remember { mutableStateOf(false) }
+    var haptics by remember { mutableStateOf(true) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = "设置",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 22.sp
-                    )
-                },
+                title = { Text("设置", fontSize = 18.sp, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "关闭"
-                        )
+                        Icon(Icons.Default.Close, contentDescription = "关闭")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         },
@@ -56,153 +49,77 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                .padding(bottom = 24.dp)
         ) {
-            // 通用设置组
-            SettingsGroup(title = "通用") {
-                IosSwitch(
-                    checked = darkMode,
-                    onCheckedChange = { darkMode = it },
-                    label = "深色模式",
-                    description = "跟随系统深色模式"
-                )
-                Divider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                )
-                IosSwitch(
-                    checked = icloudSync,
-                    onCheckedChange = { icloudSync = it },
-                    label = "iCloud 同步",
-                    description = "同步聊天记录到 iCloud"
-                )
+            SettingsGroup("外观") {
+                IosSwitch(followSystem, { followSystem = it }, label = "跟随系统主题", description = "自动切换浅色与深色")
+                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                IosSwitch(compactMode, { compactMode = it }, label = "紧凑布局", description = "减少列表和消息间距")
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // 数据管理组
-            SettingsGroup(title = "数据管理") {
-                SettingsItem(
-                    icon = Icons.Default.DeleteSweep,
-                    title = "清除所有对话",
-                    subtitle = "删除所有聊天记录",
-                    onClick = { }
-                )
-                Divider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                )
-                SettingsItem(
-                    icon = Icons.Default.Backup,
-                    title = "导出数据",
-                    subtitle = "导出聊天记录和设置",
-                    onClick = { }
-                )
+            SettingsGroup("交互") {
+                IosSwitch(haptics, { haptics = it }, label = "触感反馈", description = "按钮操作时提供轻触反馈")
+                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                SettingsRow(Icons.Default.Tune, "聊天偏好", "模型、上下文与回复设置")
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // 关于组
-            SettingsGroup(title = "关于") {
-                SettingsItem(
-                    icon = Icons.Default.Info,
-                    title = "关于 AgentT",
-                    subtitle = "版本 1.0.0",
-                    onClick = { }
-                )
+            SettingsGroup("数据") {
+                SettingsRow(Icons.Default.Backup, "导出数据", "会话、服务和设置")
+                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                SettingsRow(Icons.Default.DeleteSweep, "清除本地数据", "当前壳仅使用临时演示数据", destructive = true)
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // 底部信息
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "AgentT",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                )
-                Text(
-                    text = "Your Private AI Agent",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
-                )
+            SettingsGroup("关于") {
+                SettingsRow(Icons.Default.Info, "AgentT", "TIN 风格 Android 界面壳")
             }
-
-            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
 
 @Composable
-private fun SettingsGroup(
-    title: String,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Column {
+private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    val isDark = isSystemInDarkTheme()
+    val cs = MaterialTheme.colorScheme
+    val background = if (isDark) Color.White.copy(alpha = 0.10f) else Color(0xFFF7F7F9)
+
+    Column(modifier = Modifier.padding(top = 18.dp)) {
         Text(
-            text = title,
+            title,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            color = cs.onSurface.copy(alpha = 0.55f)
         )
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        Surface(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = background,
+            border = BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.16f))
         ) {
-            Column {
-                content()
-            }
+            Column(modifier = Modifier.padding(horizontal = 14.dp)) { content() }
         }
     }
 }
 
 @Composable
-private fun SettingsItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun SettingsRow(
+    icon: ImageVector,
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    destructive: Boolean = false
 ) {
+    val cs = MaterialTheme.colorScheme
+    val tint = if (destructive) cs.error else cs.primary
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().clickable { }.padding(vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Normal
-            )
-            Text(
-                text = subtitle,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-            )
+        Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = tint)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 15.sp, color = if (destructive) cs.error else cs.onSurface)
+            Text(subtitle, fontSize = 12.sp, color = cs.onSurface.copy(alpha = 0.5f))
         }
-        Icon(
-            imageVector = Icons.Default.ChevronRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-            modifier = Modifier.size(20.dp)
-        )
+        Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp), tint = cs.onSurface.copy(alpha = 0.3f))
     }
 }
