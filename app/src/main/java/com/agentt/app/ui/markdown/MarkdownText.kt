@@ -32,9 +32,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.LinkInteraction
 import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -208,7 +208,7 @@ private fun buildInline(
     linkColor: Color,
     context: Context,
 ): AnnotatedString {
-    val b = buildAnnotatedString {
+    return buildAnnotatedString {
         append(text)
 
         Regex("`([^`]+)`").findAll(text).forEach { m ->
@@ -235,16 +235,13 @@ private fun buildInline(
             val url = m.groupValues[2]
             val link = LinkAnnotation.Clickable(
                 tag = url,
-                styles = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
-                linkInteractionListener = LinkInteractionListener { interaction ->
-                    if (interaction is LinkInteraction.Click) {
-                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                    }
+                styles = TextLinkStyles(style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
+                linkInteractionListener = LinkInteractionListener {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                     true
                 }
             )
             addLink(link, m.range.first, m.range.last + 1)
         }
     }
-    return b.toAnnotatedString()
 }
