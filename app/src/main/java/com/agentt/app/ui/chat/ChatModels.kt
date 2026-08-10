@@ -19,8 +19,55 @@ data class ChatMessage(
     val id: String,
     val role: String,
     val content: String,
-    val model: String? = null
+    val model: String? = null,
+    val kind: String = "text" // text | think | tool | reply
 )
+
+data class AgentAction(
+    val type: String,
+    val tool: String = "",
+    val url: String? = null,
+    val query: String? = null,
+    val content: String = ""
+)
+
+fun extractJson(content: String): String? {
+    val t = content.trim()
+    if (t.startsWith("{")) {
+        val s = t.indexOf('{')
+        val e = t.lastIndexOf('}')
+        return if (s >= 0 && e > s) t.substring(s, e + 1) else null
+    }
+    val fence = Regex("```(?:json)?\\s*([\\s\\S]*?)```")
+    val m = fence.find(content)
+    if (m != null) return m.groupValues[1].trim()
+    return null
+}
+
+fun parseActionStream(content: String): List<AgentAction>? {
+    val json = extractJson(content) ?: return null
+    return try {
+        val obj = JSONObject(json)
+        val arr = obj.optJSONArray("actions") ?: return null
+        val list = buildList {
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                add(
+                    AgentAction(
+                        type = o.optString("type"),
+                        tool = o.optString("tool"),
+                        url = o.optString("url").ifBlank { null },
+                        query = o.optString("query").ifBlank { null },
+                        content = o.optString("content")
+                    )
+                )
+            }
+        }.filter { it.type.isNotBlank() }
+        if (list.isEmpty()) null else list
+    } catch (_: Exception) {
+        null
+    }
+}
 
 class ChatStore(private val prefs: SharedPreferences) {
 
@@ -93,7 +140,8 @@ class ChatStore(private val prefs: SharedPreferences) {
                             id = o.optString("id"),
                             role = o.optString("role"),
                             content = o.optString("content"),
-                            model = o.optString("model").ifBlank { null }
+                            model = o.optString("model").ifBlank { null },
+                            kind = o.optString("kind").ifBlank { "text" }
                         )
                     )
                 }
@@ -112,6 +160,7 @@ class ChatStore(private val prefs: SharedPreferences) {
                     .put("role", it.role)
                     .put("content", it.content)
                     .put("model", it.model ?: JSONObject.NULL)
+                    .put("kind", it.kind)
             )
         }
         prefs.edit().putString(KEY_MSG_PREFIX + sessionId, arr.toString()).apply()

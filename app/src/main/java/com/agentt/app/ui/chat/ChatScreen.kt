@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.AddComment
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DropdownMenu
@@ -60,12 +61,34 @@ import androidx.compose.ui.unit.dp
 import com.agentt.app.ui.providers.ProviderConfig
 import com.agentt.app.ui.providers.ProviderStore
 import com.agentt.app.ui.providers.httpJson
+import com.agentt.app.ui.web.WebTools
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+
+const val MAX_AGENT_STEPS = 5
+
+private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓手机上。你通过“动作流”来完成任务。
+你可以调用内置网页工具获取实时信息：
+- browser.open(url)：在内置浏览器中打开网页
+- browser.extract(url)：抓取网页并返回正文纯文本
+- browser.title(url)：获取网页标题
+- browser.links(url)：提取网页中的所有链接
+- browser.search(query)：搜索网页，返回结果列表
+
+你的输出必须是 JSON 动作流，不要输出任何其它文字，格式如下：
+{"actions":[{"type":"think","content":"你的推理"},{"type":"browser","tool":"extract","url":"https://example.com"},{"type":"reply","content":"最终回答"}]}
+
+规则：
+1. type 只能是 think（推理）、browser（调用工具）、reply（最终回复）。
+2. browser 动作必须带 tool 字段；extract/title/links 带 url，search 带 query。
+3. 需要网页信息时，先用 browser 获取，工具结果会自动回传给你，你再继续推理。
+4. 如果一次动作流里没有 reply，你会收到工具结果后继续，直到给出 reply。
+5. 不需要工具时，直接输出 {"actions":[{"type":"reply","content":"回答"}]}。
+6. reply 的 content 是最终展示给用户的内容，使用与用户相同的语言。"""
 
 data class ChatReply(val ok: Boolean, val content: String, val error: String?)
 
@@ -93,7 +116,7 @@ private fun chatOpenAi(p: ProviderConfig, history: List<ChatMessage>): String {
     val r = httpJson(
         "POST", p.baseUrl.trimEnd('/') + "/chat/completions",
         mapOf("Authorization" to "Bearer ${p.apiKey}"),
-        JSONObject().put("model", p.mainModel).put("max_tokens", 2048).put("messages", chatMessages(history))
+        JSONObject().put("model", p.mainModel).put("max_tokens", 4096).put("messages", chatMessages(history))
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
     return JSONObject(r.body).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
@@ -104,7 +127,7 @@ private fun chatAnthropic(p: ProviderConfig, history: List<ChatMessage>): String
     val r = httpJson(
         "POST", p.baseUrl.trimEnd('/') + "/v1/messages",
         mapOf("x-api-key" to p.apiKey, "anthropic-version" to "2023-06-01"),
-        JSONObject().put("model", p.mainModel).put("max_tokens", 2048).put("messages", chatMessages(history))
+        JSONObject().put("model", p.mainModel).put("max_tokens", 4096).put("messages", chatMessages(history))
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
     return JSONObject(r.body).optJSONArray("content")?.optJSONObject(0)?.optString("text")
@@ -142,6 +165,16 @@ private fun chatOllama(p: ProviderConfig, history: List<ChatMessage>): String {
         ?: throw RuntimeException("响应中无内容")
 }
 
+private fun buildAgentHistory(history: List<ChatMessage>, toolResults: List<String>): List<ChatMessage> {
+    val out = mutableListOf<ChatMessage>()
+    out.add(ChatMessage(UUID.randomUUID().toString(), "user", "[系统指令]\n$SYSTEM_PROMPT", null, "text"))
+    history.forEach { if (it.kind != "tool") out.add(it) }
+    toolResults.forEach {
+        out.add(ChatMessage(UUID.randomUUID().toString(), "user", it, null, "text"))
+    }
+    return out
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -150,7 +183,7 @@ fun ChatScreen(
     onBack: () -> Unit,
     onNewChat: () -> Unit,
     onOpenTerminal: () -> Unit,
-    onOpenBrowser: () -> Unit,
+    onOpenBrowser: (String?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -172,6 +205,50 @@ fun ChatScreen(
         if (sessionId != null) chatStore.saveMessages(sessionId, messages.toList())
     }
 
+    suspend fun runAgent(provider: ProviderConfig) {
+        val toolResults = mutableListOf<String>()
+        repeat(MAX_AGENT_STEPS) {
+            val reply = chatWithProvider(provider, buildAgentHistory(messages.toList(), toolResults))
+            if (!reply.ok) {
+                messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "⚠️ 调用失败：${reply.error}", provider.mainModel, "reply"))
+                persist()
+                return
+            }
+            val actions = parseActionStream(reply.content)
+            if (actions == null || actions.isEmpty()) {
+                messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", reply.content, provider.mainModel, "reply"))
+                persist()
+                return
+            }
+            var done = false
+            for (a in actions) {
+                when (a.type) {
+                    "think" -> messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, provider.mainModel, "think"))
+                    "browser" -> {
+                        val summary = WebTools.runTool(a.tool, a.url, a.query)
+                        messages.add(
+                            ChatMessage(
+                                UUID.randomUUID().toString(), "assistant",
+                                "${a.tool}(${a.url ?: a.query})\n${summary.take(1500)}",
+                                provider.mainModel, "tool"
+                            )
+                        )
+                        toolResults.add("[工具 ${a.tool}(${a.url ?: a.query}) 结果]\n${summary.take(3000)}")
+                        if (a.tool == "open" && a.url != null) onOpenBrowser(a.url)
+                    }
+                    "reply" -> {
+                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, provider.mainModel, "reply"))
+                        done = true
+                    }
+                }
+                persist()
+            }
+            if (done) return
+        }
+        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "已达到最大执行步数（$MAX_AGENT_STEPS），请把问题拆小后重试。", provider.mainModel, "reply"))
+        persist()
+    }
+
     fun send() {
         val text = input.trim()
         if (text.isEmpty() || loading) return
@@ -182,23 +259,13 @@ fun ChatScreen(
         scope.launch {
             val provider = providerStore.load().firstOrNull()
             if (provider == null) {
-                messages.add(
-                    ChatMessage(
-                        UUID.randomUUID().toString(), "assistant",
-                        "尚未配置供应商：请到 设置 → 供应商 添加并测试连接后，再开始对话。", null
-                    )
-                )
+                messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "尚未配置供应商：请到 设置 → 供应商 添加并测试连接后，再开始对话。", null, "reply"))
                 loading = false
                 persist()
                 return@launch
             }
-            val reply = chatWithProvider(provider, messages.map { it })
-            messages.add(
-                if (reply.ok) ChatMessage(UUID.randomUUID().toString(), "assistant", reply.content, provider.mainModel)
-                else ChatMessage(UUID.randomUUID().toString(), "assistant", "⚠️ 调用失败：${reply.error}", provider.mainModel)
-            )
+            runAgent(provider)
             loading = false
-            persist()
         }
     }
 
@@ -236,7 +303,7 @@ fun ChatScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text("打开浏览器") },
-                                onClick = { menuExpanded = false; onOpenBrowser() },
+                                onClick = { menuExpanded = false; onOpenBrowser(null) },
                                 leadingIcon = { Icon(Icons.Outlined.Public, contentDescription = null) }
                             )
                         }
@@ -278,8 +345,12 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(messages, key = { it.id }) { m ->
-                    if (m.role == "user") UserBubble(m.content)
-                    else AgentCard(m.content, m.model)
+                    when {
+                        m.role == "user" -> UserBubble(m.content)
+                        m.kind == "think" -> ThinkCard(m.content)
+                        m.kind == "tool" -> ToolCard(m.content)
+                        else -> AgentCard(m.content, m.model)
+                    }
                 }
                 if (loading) item { AgentThinking() }
             }
@@ -321,14 +392,53 @@ private fun AgentCard(content: String, model: String?) {
                     Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("Agent", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                model?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                Column {
+                    Text("Agent", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    model?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
                 }
             }
             Spacer(Modifier.height(8.dp))
             Text(content, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+private fun ThinkCard(content: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Bolt, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(6.dp))
+                Text("思考", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ToolCard(content: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(6.dp))
+                Text("网页工具", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -349,7 +459,7 @@ private fun AgentThinking() {
                 Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
             }
             Spacer(Modifier.width(10.dp))
-            Text("Agent 正在思考…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Agent 正在执行动作流…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

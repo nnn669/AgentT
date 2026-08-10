@@ -1,7 +1,6 @@
 package com.agentt.app
 
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,6 +18,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.agentt.app.ui.browser.BrowserScreen
 import com.agentt.app.ui.chat.ChatScreen
 import com.agentt.app.ui.chat.ChatStore
 import com.agentt.app.ui.chat.createChatSession
@@ -28,7 +28,7 @@ import com.agentt.app.ui.theme.AgentTTheme
 import com.agentt.app.ui.workspace.WorkspaceScreen
 import kotlinx.coroutines.launch
 
-enum class Screen { Workspace, Chat, Providers }
+enum class Screen { Workspace, Chat, Providers, Browser }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
                     var screen by rememberSaveable { mutableStateOf(Screen.Workspace) }
                     var chatSessionId by rememberSaveable { mutableStateOf<String?>(null) }
                     var chatTitle by rememberSaveable { mutableStateOf("") }
+                    var browserUrl by rememberSaveable { mutableStateOf("") }
 
                     fun openChat(sessionId: String, title: String) {
                         chatSessionId = sessionId
@@ -71,10 +72,17 @@ class MainActivity : ComponentActivity() {
                                 chatSessionId = s.id
                                 chatTitle = s.title
                             },
-                            onOpenTerminal = { Toast.makeText(this@MainActivity, "终端暂未开放", Toast.LENGTH_SHORT).show() },
-                            onOpenBrowser = { Toast.makeText(this@MainActivity, "浏览器暂未开放", Toast.LENGTH_SHORT).show() }
+                            onOpenTerminal = { android.widget.Toast.makeText(this@MainActivity, "终端暂未开放", android.widget.Toast.LENGTH_SHORT).show() },
+                            onOpenBrowser = { url ->
+                                browserUrl = url ?: ""
+                                screen = Screen.Browser
+                            }
                         )
                         Screen.Providers -> ProvidersScreen(onBack = { screen = Screen.Workspace })
+                        Screen.Browser -> BrowserScreen(
+                            initialUrl = browserUrl,
+                            onBack = { screen = Screen.Chat }
+                        )
                     }
                 }
             }
