@@ -1,5 +1,10 @@
 package com.agentt.app.ui.chat
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -58,11 +64,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.agentt.app.ui.markdown.MarkdownText
 import com.agentt.app.ui.providers.ProviderConfig
 import com.agentt.app.ui.providers.ProviderStore
 import com.agentt.app.ui.providers.httpJson
 import com.agentt.app.ui.web.WebTools
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -193,6 +201,9 @@ fun ChatScreen(
     var input by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var streamingId by remember { mutableStateOf<String?>(null) }
+    var streamTick by remember { mutableStateOf(0) }
+    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionId) {
@@ -201,8 +212,21 @@ fun ChatScreen(
         loading = false
     }
 
+    // Auto-follow: scroll to the newest message when the list grows or the
+    // typewriter pushes a reply card taller.
+    LaunchedEffect(messages.size, streamTick) {
+        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+    }
+
     fun persist() {
         if (sessionId != null) chatStore.saveMessages(sessionId, messages.toList())
+    }
+
+    fun addReply(content: String, model: String?) {
+        val id = UUID.randomUUID().toString()
+        messages.add(ChatMessage(id, "assistant", content, model, "reply"))
+        streamingId = id
+        persist()
     }
 
     suspend fun runAgent(provider: ProviderConfig) {
@@ -210,20 +234,21 @@ fun ChatScreen(
         repeat(MAX_AGENT_STEPS) {
             val reply = chatWithProvider(provider, buildAgentHistory(messages.toList(), toolResults))
             if (!reply.ok) {
-                messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "⚠️ 调用失败：${reply.error}", provider.mainModel, "reply"))
-                persist()
+                addReply("⚠️ 调用失败：${reply.error}", provider.mainModel)
                 return
             }
             val actions = parseActionStream(reply.content)
             if (actions == null || actions.isEmpty()) {
-                messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", reply.content, provider.mainModel, "reply"))
-                persist()
+                addReply(reply.content, provider.mainModel)
                 return
             }
             var done = false
             for (a in actions) {
                 when (a.type) {
-                    "think" -> messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, provider.mainModel, "think"))
+                    "think" -> {
+                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, provider.mainModel, "think"))
+                        persist()
+                    }
                     "browser" -> {
                         val summary = WebTools.runTool(a.tool, a.url, a.query)
                         messages.add(
@@ -235,18 +260,17 @@ fun ChatScreen(
                         )
                         toolResults.add("[工具 ${a.tool}(${a.url ?: a.query}) 结果]\n${summary.take(3000)}")
                         if (a.tool == "open" && a.url != null) onOpenBrowser(a.url)
+                        persist()
                     }
                     "reply" -> {
-                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, provider.mainModel, "reply"))
+                        addReply(a.content, provider.mainModel)
                         done = true
                     }
                 }
-                persist()
             }
             if (done) return
         }
-        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "已达到最大执行步数（$MAX_AGENT_STEPS），请把问题拆小后重试。", provider.mainModel, "reply"))
-        persist()
+        addReply("已达到最大执行步数（$MAX_AGENT_STEPS），请把问题拆小后重试。", provider.mainModel)
     }
 
     fun send() {
@@ -259,9 +283,8 @@ fun ChatScreen(
         scope.launch {
             val provider = providerStore.load().firstOrNull()
             if (provider == null) {
-                messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "尚未配置供应商：请到 设置 → 供应商 添加并测试连接后，再开始对话。", null, "reply"))
+                addReply("尚未配置供应商：请到 设置 → 供应商 添加并测试连接后，再开始对话。", null)
                 loading = false
-                persist()
                 return@launch
             }
             runAgent(provider)
@@ -340,6 +363,7 @@ fun ChatScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -349,7 +373,12 @@ fun ChatScreen(
                         m.role == "user" -> UserBubble(m.content)
                         m.kind == "think" -> ThinkCard(m.content)
                         m.kind == "tool" -> ToolCard(m.content)
-                        else -> AgentCard(m.content, m.model)
+                        else -> AgentCard(
+                            content = m.content,
+                            model = m.model,
+                            streaming = m.id == streamingId,
+                            onTick = { streamTick++ }
+                        )
                     }
                 }
                 if (loading) item { AgentThinking() }
@@ -376,7 +405,32 @@ private fun UserBubble(content: String) {
 }
 
 @Composable
-private fun AgentCard(content: String, model: String?) {
+private fun AgentCard(
+    content: String,
+    model: String?,
+    streaming: Boolean = false,
+    onTick: () -> Unit = {},
+) {
+    var visible by remember(content, streaming) {
+        mutableStateOf(if (streaming) 0 else content.length)
+    }
+    LaunchedEffect(content, streaming) {
+        if (!streaming) {
+            visible = content.length
+            return@LaunchedEffect
+        }
+        while (visible < content.length) {
+            visible = nextBoundary(content, visible)
+            onTick()
+            delay(24)
+        }
+    }
+    val cursorAlpha by rememberInfiniteTransition(label = "cursor").animateFloat(
+        initialValue = 0.15f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
+        label = "cursorAlpha"
+    )
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -400,7 +454,18 @@ private fun AgentCard(content: String, model: String?) {
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Text(content, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+            MarkdownText(
+                content.take(visible),
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            if (streaming && visible < content.length) {
+                Text(
+                    "▍",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = cursorAlpha)
+                )
+            }
         }
     }
 }
@@ -505,4 +570,18 @@ private fun ChatInputBar(
             Icon(Icons.Outlined.ArrowUpward, contentDescription = "发送", tint = MaterialTheme.colorScheme.onPrimary)
         }
     }
+}
+
+// Advance the typewriter to the next sentence / line boundary (with a 48-char
+// guard so unpunctuated text still progresses).
+private fun nextBoundary(text: String, from: Int): Int {
+    var i = from
+    var guard = 0
+    while (i < text.length && guard < 48) {
+        val c = text[i]
+        if (c == '\n' || c == '。' || c == '！' || c == '？' || c == '.' || c == '!' || c == '?') break
+        i++
+        guard++
+    }
+    return if (i > from) minOf(text.length, i + 1) else minOf(text.length, from + 16)
 }
