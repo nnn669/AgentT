@@ -150,6 +150,7 @@ private fun ProviderCard(provider: AIProvider, onDelete: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddProviderDialog(onDismiss: () -> Unit, onConfirm: (AIProvider) -> Unit) {
     var selectedType by remember { mutableStateOf(ProviderType.OPEN_AI) }
