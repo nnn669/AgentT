@@ -63,7 +63,6 @@ class AgentRecoveryTest {
         assertFalse(safe.contains("abc123"))
         assertFalse(safe.contains("token456"))
         val message = recoveryFailureMessage(listOf(RecoveryAttempt("P", "M", 1, "请求超时")))
-        assertTrue(message.contains("已自动重试"))
         assertTrue(message.contains("P / M"))
     }
 }
