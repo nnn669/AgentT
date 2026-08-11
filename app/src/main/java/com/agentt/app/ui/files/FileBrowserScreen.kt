@@ -49,7 +49,7 @@ fun FileBrowserScreen(
     var previewContent by remember { mutableStateOf<String?>(null) }
     var previewFile by remember { mutableStateOf<String?>(null) }
     var showDeleteConfirm by remember { mutableStateOf<String?>(null) }
-    var snackbarHostState by remember { mutableStateOf(SnackbarHostState()) }
+    val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val history = remember { mutableStateListOf(baseDir.absolutePath) }
 
@@ -59,10 +59,11 @@ fun FileBrowserScreen(
             currentDir = dir
             currentPathText = dir.absolutePath
             val list = withContext(Dispatchers.IO) {
-                val files = dir.listFiles()?.sortedWith(
+                val files: Array<File> = dir.listFiles() ?: emptyArray()
+                val sorted = files.sortedWith(
                     compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() }
-                ) ?: emptyArray()
-                files.map { f ->
+                )
+                sorted.map { f: File ->
                     FileEntry(
                         name = f.name,
                         path = f.absolutePath,
@@ -101,7 +102,7 @@ fun FileBrowserScreen(
         loadDirectory(baseDir)
     }
 
-    // 预览/删除对话框
+    // Preview dialog
     if (previewContent != null && previewFile != null) {
         AlertDialog(
             onDismissRequest = { previewContent = null; previewFile = null },
@@ -125,6 +126,7 @@ fun FileBrowserScreen(
         )
     }
 
+    // Delete confirmation dialog
     if (showDeleteConfirm != null) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
@@ -158,6 +160,7 @@ fun FileBrowserScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -176,74 +179,58 @@ fun FileBrowserScreen(
                     IconButton(onClick = {
                         if (history.size > 1) navigateBack() else onBack()
                     }) {
-                        Icon(Icons.Outlined.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
                 actions = {
-                    if (currentDir.absolutePath != baseDir.absolutePath) {
-                        IconButton(onClick = { navigateUp() }) {
-                            Icon(Icons.Outlined.ArrowUpward, contentDescription = "上级目录")
-                        }
+                    IconButton(onClick = { navigateUp() }) {
+                        Icon(Icons.Outlined.ArrowUpward, contentDescription = "上级目录", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        }
     ) { innerPadding ->
-        if (isLoading) {
-            Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.FolderOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f)
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text("空目录", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Box(Modifier.fillMaxSize().padding(innerPadding)) {
+            if (isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(entries, key = { it.path }) { entry ->
-                    FileEntryRow(
-                        entry = entry,
-                        onClick = {
-                            if (entry.isDirectory) {
-                                navigateTo(File(entry.path))
-                            } else {
-                                scope.launch {
-                                    previewFile = entry.name
-                                    previewContent = withContext(Dispatchers.IO) {
-                                        try {
+            } else if (entries.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("空目录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(entries, key = { it.path }) { entry ->
+                        FileEntryRow(
+                            entry = entry,
+                            onClick = {
+                                if (entry.isDirectory) {
+                                    navigateTo(File(entry.path))
+                                } else {
+                                    scope.launch {
+                                        previewFile = entry.name
+                                        previewContent = withContext(Dispatchers.IO) {
                                             val file = File(entry.path)
-                                            if (file.length() > 500_000) {
-                                                "文件过大 (${formatSize(file.length())})，无法预览"
+                                            if (file.length() > 1024 * 1024) {
+                                                "文件过大，无法预览（${formatSize(file.length())}）"
                                             } else {
-                                                file.readText(Charsets.UTF_8).take(10_000)
-                                                    .let { if (it.length >= 10_000) "$it\n\n...(截断)" else it }
+                                                try {
+                                                    file.readText(Charsets.UTF_8).take(5000)
+                                                } catch (e: Exception) {
+                                                    "无法预览: ${e.message ?: e.javaClass.simpleName}"
+                                                }
                                             }
-                                        } catch (e: Exception) {
-                                            "无法预览: ${e.message ?: e.javaClass.simpleName}"
                                         }
                                     }
                                 }
+                            },
+                            onDelete = {
+                                showDeleteConfirm = entry.name
                             }
-                        },
-                        onDelete = {
-                            showDeleteConfirm = entry.path
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -254,61 +241,38 @@ fun FileBrowserScreen(
 private fun FileEntryRow(
     entry: FileEntry,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Surface(
         onClick = onClick,
         color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icon
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (entry.isDirectory) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    if (entry.isDirectory) Icons.Outlined.Folder
-                    else getFileIcon(entry.name),
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp),
-                    tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Icon(
+                imageVector = if (entry.isDirectory) Icons.Outlined.Folder else getFileIcon(entry.name),
+                contentDescription = null,
+                tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                modifier = Modifier.size(24.dp)
+            )
             Spacer(Modifier.width(12.dp))
-            // Name + details
             Column(Modifier.weight(1f)) {
                 Text(
                     entry.name,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(2.dp))
-                Row {
-                    if (!entry.isDirectory) {
-                        Text(
-                            formatSize(entry.size),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text("  ·  ", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                if (!entry.isDirectory) {
                     Text(
-                        formatTime(entry.lastModified),
+                        formatSize(entry.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
