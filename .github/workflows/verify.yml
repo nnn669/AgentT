@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  unit-tests:
+  compile-diagnostic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,5 +19,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - name: Compile with concise diagnostics
+        shell: bash
+        run: |
+          set +e
+          gradle compileDebugKotlin --no-daemon --console=plain 2>&1 | tee compile.log
+          status=${PIPESTATUS[0]}
+          echo ""
+          echo "========== Kotlin compiler diagnostics =========="
+          grep -E "(^e: |\.kt:[0-9]+:[0-9]+: error:|FAILURE: Build failed)" compile.log || true
+          exit "$status"
       - name: Run unit tests
-        run: gradle testDebugUnitTest --no-daemon --stacktrace
+        if: success()
+        run: gradle testDebugUnitTest --no-daemon --console=plain
