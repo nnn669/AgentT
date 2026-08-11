@@ -6,8 +6,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 
-/** Compatibility alias for the user avatar used by the chat UI. */
-val Icons.Outlined.Face: ImageVector
+/**
+ * Low-priority fallback for call sites that do not import the Material icon.
+ * An official Face extension with the specific receiver wins when both exist.
+ */
+val Any.Face: ImageVector
     get() = Icons.Outlined.AccountCircle
 
 /**
