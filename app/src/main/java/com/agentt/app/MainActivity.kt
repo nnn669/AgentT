@@ -71,16 +71,16 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         Screen.Chat -> ChatScreen(
-                            chatTitle,
-                            chatSessionId,
-                            { screen = Screen.Workspace },
-                            {
+                            sessionId = chatSessionId,
+                            title = chatTitle,
+                            onBack = { screen = Screen.Workspace },
+                            onNewChat = {
                                 val session = createChatSession(ChatStore.from(this@MainActivity))
                                 chatSessionId = session.id
                                 chatTitle = session.title
                             },
-                            { screen = Screen.Terminal },
-                            { url ->
+                            onOpenTerminal = { screen = Screen.Terminal },
+                            onOpenBrowser = { url ->
                                 browserUrl = url ?: ""
                                 screen = Screen.Browser
                             }
