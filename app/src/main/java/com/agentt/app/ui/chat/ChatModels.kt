@@ -28,7 +28,11 @@ data class AgentAction(
     val tool: String = "",
     val url: String? = null,
     val query: String? = null,
-    val content: String = ""
+    val content: String = "",
+    val command: String? = null,
+    val backend: String = "LOCAL",
+    val timeoutMs: Long = 30_000,
+    val maxOutputChars: Int = 256_000
 )
 
 fun extractJson(content: String): String? {
@@ -52,17 +56,23 @@ fun parseActionStream(content: String): List<AgentAction>? {
         val list = buildList {
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
+                val type = o.optString("type")
+                if (type.isBlank()) continue
                 add(
                     AgentAction(
-                        type = o.optString("type"),
+                        type = type,
                         tool = o.optString("tool"),
                         url = o.optString("url").ifBlank { null },
                         query = o.optString("query").ifBlank { null },
-                        content = o.optString("content")
+                        content = o.optString("content"),
+                        command = o.optString("command").ifBlank { null },
+                        backend = o.optString("backend", "LOCAL").uppercase(),
+                        timeoutMs = o.optLong("timeout_ms", 30_000).coerceIn(1_000, 120_000),
+                        maxOutputChars = o.optInt("max_output_chars", 256_000).coerceIn(1_024, 512_000)
                     )
                 )
             }
-        }.filter { it.type.isNotBlank() }
+        }
         if (list.isEmpty()) null else list
     } catch (_: Exception) {
         null
