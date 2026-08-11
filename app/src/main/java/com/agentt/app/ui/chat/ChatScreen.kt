@@ -77,6 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 
 const val MAX_AGENT_STEPS = 5
@@ -212,7 +213,7 @@ data class Action(
 fun parseActionStream(json: String): List<Action>? = runCatching {
     val o = JSONObject(json)
     val arr = o.optJSONArray("actions") ?: return@runCatching null
-    buildList {
+    buildList<Action> {
         for (i in 0 until arr.length()) {
             val a = arr.getJSONObject(i)
             add(Action(
@@ -418,7 +419,7 @@ fun ChatScreen(
     suspend fun runAgent(providers: List<ProviderConfig>) {
         var candidates = providers
         val toolResults = mutableListOf<String>()
-        val fileBaseDir = fileTools.getBaseDir(context.applicationContext)
+        val fileBaseDir: File = fileTools.getBaseDir(context.applicationContext)
         repeat(MAX_AGENT_STEPS) {
             val failedAttempts = mutableListOf<RecoveryAttempt>()
             val recovery = recoverChatWithProviders(
@@ -484,25 +485,25 @@ fun ChatScreen(
                                 }
                                 toolName.startsWith("file.") -> when (toolName.removePrefix("file.")) {
                                     "list" -> {
-                                        val path = a.path ?: a.url ?: fileBaseDir
-                                        FileTools.listFiles(context, path)
+                                        val path = a.path ?: a.url ?: ""
+                                        fileTools.list(fileBaseDir, path)
                                     }
                                     "read" -> {
                                         val path = a.path ?: a.url ?: ""
-                                        if (path.isBlank()) "文件路径为空" else FileTools.readFile(context, path)
+                                        if (path.isBlank()) "文件路径为空" else fileTools.read(fileBaseDir, path)
                                     }
                                     "write" -> {
                                         val path = a.path ?: ""
                                         val content = a.content ?: ""
-                                        if (path.isBlank()) "文件路径为空" else FileTools.writeFile(context, path, content)
+                                        if (path.isBlank()) "文件路径为空" else fileTools.write(fileBaseDir, path, content)
                                     }
                                     "stat" -> {
                                         val path = a.path ?: a.url ?: ""
-                                        if (path.isBlank()) "文件路径为空" else FileTools.statFile(context, path)
+                                        if (path.isBlank()) "文件路径为空" else fileTools.stat(fileBaseDir, path)
                                     }
                                     "delete" -> {
                                         val path = a.path ?: a.url ?: ""
-                                        if (path.isBlank()) "文件路径为空" else FileTools.deleteFile(context, path)
+                                        if (path.isBlank()) "文件路径为空" else fileTools.delete(fileBaseDir, path)
                                     }
                                     else -> null
                                 }
@@ -704,56 +705,70 @@ private fun MessageBubble(
                             Text(
                                 msg.model,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                             )
                         }
                     }
                 }
             }
             kind == "think" -> {
-                Row(
-                    modifier = Modifier
-                        .widthIn(max = 320.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(bubbleColor)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
                 ) {
-                    Icon(
-                        Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.tertiary
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        msg.content,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Bolt,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "推理",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            msg.content.take(200),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
             kind == "tool" -> {
-                Row(
-                    modifier = Modifier
-                        .widthIn(max = 320.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(bubbleColor)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 ) {
-                    Icon(
-                        Icons.Outlined.Bolt,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (msg.content.length > 100) msg.content.take(100) + "…" else msg.content,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Bolt,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "工具结果",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            msg.content.take(200),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
         }
@@ -775,7 +790,10 @@ private fun TypingIndicator(
         label = "alpha"
     )
     Row(
-        modifier = modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         repeat(3) {
