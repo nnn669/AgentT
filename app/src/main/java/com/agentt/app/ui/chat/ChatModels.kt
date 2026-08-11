@@ -6,6 +6,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+data class ChatMessage(
+    val id: String,
+    val role: String,
+    val content: String,
+    val model: String? = null,
+    val kind: String = "text"
+)
+
 data class ChatCategory(val id: String, val name: String)
 
 data class ChatSession(val id: String, val title: String, val categoryId: String?, val updatedAt: Long)
