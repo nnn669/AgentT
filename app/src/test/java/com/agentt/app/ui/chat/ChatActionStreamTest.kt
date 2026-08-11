@@ -21,6 +21,17 @@ class ChatActionStreamTest {
     }
 
     @Test
+    fun parsesTerminalActionWithSafetyLimits() {
+        val stream = """{"actions":[{"type":"terminal","command":"ls -la","backend":"local","timeout_ms":999999,"max_output_chars":10}]}"""
+        val action = parseActionStream(stream)!!.single()
+        assertEquals("terminal", action.type)
+        assertEquals("ls -la", action.command)
+        assertEquals("LOCAL", action.backend)
+        assertEquals(120_000L, action.timeoutMs)
+        assertEquals(1_024, action.maxOutputChars)
+    }
+
+    @Test
     fun parsesFencedJson() {
         val stream = "```json\n{\"actions\":[{\"type\":\"reply\",\"content\":\"完成\"}]}\n```"
         val actions = parseActionStream(stream)
