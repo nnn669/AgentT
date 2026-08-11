@@ -1,6 +1,7 @@
 package com.agentt.app.ui.web
 
 import android.content.Context
+import com.agentt.app.ui.settings.SandboxEnvironmentStore
 import com.agentt.app.ui.terminal.LocalTerminalBackend
 import com.agentt.app.ui.terminal.TerminalAgentTool
 import com.agentt.app.ui.terminal.TerminalBackendId
@@ -17,12 +18,15 @@ object WebTools {
     private const val UA =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
     @Volatile private var terminalTool: TerminalAgentTool? = null
+    @Volatile private var sandboxEnvironment: SandboxEnvironmentStore? = null
 
     fun initialize(context: Context) {
+        val applicationContext = context.applicationContext
         if (terminalTool == null) {
             synchronized(this) {
                 if (terminalTool == null) {
-                    terminalTool = TerminalAgentTool(LocalTerminalBackend(context.applicationContext))
+                    terminalTool = TerminalAgentTool(LocalTerminalBackend(applicationContext))
+                    sandboxEnvironment = SandboxEnvironmentStore.from(applicationContext)
                 }
             }
         }
@@ -62,7 +66,8 @@ object WebTools {
                 else -> Unit
             }
         }
-        output.toString().trim().ifBlank { "命令执行完成，无输出" }
+        val result = output.toString().trim().ifBlank { "命令执行完成，无输出" }
+        sandboxEnvironment?.redactForModel(result) ?: result
     }
 
     suspend fun extract(url: String): String = withContext(Dispatchers.IO) {
@@ -81,10 +86,10 @@ object WebTools {
     suspend fun links(url: String): String = withContext(Dispatchers.IO) {
         try {
             val doc = Jsoup.connect(url).userAgent(UA).timeout(15000).get()
-            val links = doc.select("a[href]").mapNotNull { a ->
-                val href = a.absUrl("href").ifBlank { null }
+            val links = doc.select("a[href]").mapNotNull { anchor ->
+                val href = anchor.absUrl("href").ifBlank { null }
                 if (href == null || href.startsWith("javascript:") || href.startsWith("mailto:")) null
-                else "${a.text().ifBlank { href }} → $href"
+                else "${anchor.text().ifBlank { href }} → $href"
             }.distinct().take(20)
             if (links.isEmpty()) "未找到链接" else links.joinToString("\n")
         } catch (e: Exception) { "获取失败：${e.message ?: e.javaClass.simpleName}" }
@@ -94,10 +99,10 @@ object WebTools {
         try {
             val url = "https://www.bing.com/search?q=${URLEncoder.encode(query, "UTF-8")}"
             val doc = Jsoup.connect(url).userAgent(UA).timeout(15000).get()
-            val results = doc.select("li.b_algo").take(6).map { li ->
-                val a = li.selectFirst("h2 a")
-                val p = li.selectFirst(".b_caption p") ?: li.selectFirst("p")
-                "${a?.text()?.ifBlank { "（无标题）" }}\n${a?.absUrl("href")}\n${p?.text()?.ifBlank { "" }}"
+            val results = doc.select("li.b_algo").take(6).map { item ->
+                val anchor = item.selectFirst("h2 a")
+                val paragraph = item.selectFirst(".b_caption p") ?: item.selectFirst("p")
+                "${anchor?.text()?.ifBlank { "（无标题）" }}\n${anchor?.absUrl("href")}\n${paragraph?.text()?.ifBlank { "" }}"
             }
             if (results.isEmpty()) "未搜索到结果" else results.joinToString("\n---\n")
         } catch (e: Exception) { "搜索失败：${e.message ?: e.javaClass.simpleName}" }
