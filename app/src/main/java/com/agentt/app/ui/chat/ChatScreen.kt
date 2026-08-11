@@ -145,17 +145,20 @@ private fun chatAnthropic(p: ProviderConfig, history: List<ChatMessage>): String
         JSONObject().put("model", p.mainModel).put("max_tokens", 4096).put("messages", chatMessages(history))
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
-    return JSONObject(r.body).optJSONArray("content")?.optJSONObject(0)?.optString("text")
+    val content = JSONObject(r.body).optJSONArray("content")?.optJSONObject(0)?.optString("text")
         ?: throw RuntimeException("响应中无内容")
+    return content
 }
 
 private fun chatGemini(p: ProviderConfig, history: List<ChatMessage>): String {
+    val parts = JSONArray()
+    for (msg in history) {
+        parts.put(JSONObject().put("role", if (msg.role == "assistant") "model" else "user").put("parts", JSONArray().put(JSONObject().put("text", msg.content))))
+    }
     val r = httpJson(
         "POST", p.baseUrl.trimEnd('/') + "/v1beta/models/${p.mainModel}:generateContent",
         mapOf("x-goog-api-key" to p.apiKey),
-        JSONObject().put("contents", JSONArray().apply {
-            history.forEach { put(JSONObject().put("role", it.role).put("parts", JSONArray().put(JSONObject().put("text", it.content)))) }
-        })
+        JSONObject().put("contents", parts).put("generationConfig", JSONObject().put("maxOutputTokens", 4096))
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
     return JSONObject(r.body).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
@@ -173,51 +176,227 @@ private fun chatOllama(p: ProviderConfig, history: List<ChatMessage>): String {
         ?: throw RuntimeException("响应中无内容")
 }
 
-private fun buildAgentHistory(history: List<ChatMessage>, toolResults: List<String>): List<ChatMessage> {
-    val out = mutableListOf<ChatMessage>()
-    out.add(ChatMessage(UUID.randomUUID().toString(), "user", "[系统指令]\n$SYSTEM_PROMPT", null, "text"))
-    history.forEach { if (it.kind != "tool") out.add(it) }
-    toolResults.forEach {
-        out.add(ChatMessage(UUID.randomUUID().toString(), "user", it, null, "text"))
+data class ChatMessage(
+    val id: String,
+    val role: String,
+    val content: String,
+    val model: String? = null,
+    val kind: String = if (role == "user") "text" else "reply"
+)
+
+data class Action(
+    val type: String,
+    val tool: String = "",
+    val url: String? = null,
+    val query: String? = null,
+    val content: String = "",
+    val requirement: String = ""
+)
+
+fun parseActionStream(raw: String): List<Action>? {
+    try {
+        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val obj = JSONObject(cleaned)
+        val arr = obj.optJSONArray("actions") ?: return null
+        val result = mutableListOf<Action>()
+        for (i in 0 until arr.length()) {
+            val a = arr.getJSONObject(i)
+            result.add(Action(
+                type = a.optString("type", ""),
+                tool = a.optString("tool", ""),
+                url = a.optString("url", null).ifBlank { null },
+                query = a.optString("query", null).ifBlank { null },
+                content = a.optString("content", ""),
+                requirement = a.optString("requirement", "")
+            ))
+        }
+        return result
+    } catch (_: Exception) {
+        return null
     }
-    return out
+}
+
+data class RecoveryAttempt(
+    val provider: String,
+    val model: String,
+    val error: String? = null,
+    val attempt: Int = 1
+)
+
+data class RecoveryResult(
+    val provider: ProviderConfig,
+    val model: String,
+    val reply: ChatMessage
+)
+
+suspend fun recoverChatWithProviders(
+    providers: List<ProviderConfig>,
+    history: List<ChatMessage>,
+    onAttempt: (RecoveryAttempt) -> Unit = {}
+): RecoveryResult? {
+    for (provider in providers) {
+        val preferred = provider.models.firstOrNull() ?: provider.mainModel
+        var lastError: String? = null
+        for (attempt in 1..3) {
+            val attemptInfo = RecoveryAttempt(
+                provider = provider.name,
+                model = if (provider.models.size > 1) "$preferred (${provider.models.size}个模型)" else preferred,
+                attempt = attempt
+            )
+            val modelToUse = if (attempt == 1) preferred else provider.models.getOrNull(attempt - 1) ?: preferred
+            val p = provider.copy(mainModel = modelToUse, models = provider.models.filter { it != preferred } + preferred)
+            onAttempt(attemptInfo.copy(error = null))
+            val result = chatWithProvider(p, listOf(ChatMessage("sys", "system", SYSTEM_PROMPT)) + history)
+            if (result.ok) {
+                val msg = ChatMessage(
+                    UUID.randomUUID().toString(), "assistant", result.content,
+                    modelToUse, "reply"
+                )
+                return RecoveryResult(p, modelToUse, msg)
+            }
+            lastError = result.error
+            val isConfigError = result.error?.let { e ->
+                e.contains("401") || e.contains("403") || e.contains("40") ||
+                    e.contains("API key") || e.contains("apikey") || e.contains("auth") ||
+                    e.contains("not found") || e.contains("Not Found") || e.contains("404")
+            } ?: false
+            if (isConfigError) {
+                onAttempt(attemptInfo.copy(error = "配置错误，跳过此供应商"))
+                break
+            }
+            onAttempt(attemptInfo.copy(error = "请求失败，${provider.models.size - attempt}个备用模型可尝试"))
+            if (attempt < 3) delay(1000L * attempt)
+        }
+    }
+    return null
+}
+
+fun recoveryFailureMessage(attempts: List<RecoveryAttempt>): String {
+    val providers = attempts.map { it.provider }.distinct()
+    val errors = attempts.mapNotNull { it.error }.distinct()
+    val parts = mutableListOf<String>()
+    if (providers.isNotEmpty()) parts.add("已尝试供应商：${providers.joinToString("、")}")
+    if (errors.isNotEmpty()) parts.add("错误摘要：${errors.joinToString("；")}")
+    if (parts.isEmpty()) parts.add("所有供应商均无法响应")
+    return "模型请求失败，请检查供应商配置和网络连接。\n${parts.joinToString("\n")}"
+}
+
+object AgentToolRegistry {
+    private val tools = mutableListOf<AgentToolDef>()
+    fun register(t: AgentToolDef) { tools.add(t) }
+    fun all() = tools.toList()
+    fun canonicalId(tool: String): String = when {
+        tool.startsWith("browser.") -> "browser.${tool.removePrefix("browser.")}"
+        tool.startsWith("file.") -> "file.${tool.removePrefix("file.")}"
+        tool.startsWith("terminal.") -> "terminal.${tool.removePrefix("terminal.")}"
+        else -> tool
+    }
+    fun actionLabel(tool: String): String = when {
+        tool.startsWith("browser.") -> "浏览网页"
+        tool.startsWith("file.") -> "操作文件"
+        tool.startsWith("terminal.") -> "执行命令"
+        else -> "执行工具"
+    }
+}
+
+data class AgentToolDef(
+    val id: String,
+    val label: String,
+    val run: suspend (Map<String, String>) -> String
+)
+
+object TerminalAgentTool {
+    private var backend: com.agentt.app.ui.terminal.TerminalBackend? = null
+    private var initialized = false
+    private val outputBuffer = mutableListOf<String>()
+
+    fun init(backend: com.agentt.app.ui.terminal.TerminalBackend) {
+        this.backend = backend
+        initialized = true
+    }
+
+    suspend fun executeCommand(command: String): String = withContext(Dispatchers.IO) {
+        if (!initialized) return@withContext "终端未初始化"
+        val b = backend ?: return@withContext "终端后端不可用"
+        outputBuffer.clear()
+        try {
+            b.writeInput(command + "\n")
+            delay(2000)
+            val output = b.readOutput().take(3000)
+            if (output.isBlank()) "命令已执行，无输出" else output
+        } catch (e: Exception) {
+            "命令执行失败: ${e.message}"
+        }
+    }
+}
+
+private fun buildAgentHistory(messages: List<ChatMessage>, toolResults: List<String>): List<ChatMessage> {
+    val result = mutableListOf<ChatMessage>()
+    if (messages.isNotEmpty() && messages.first().role == "system") {
+        result.add(messages.first())
+    } else {
+        result.add(ChatMessage("sys", "system", SYSTEM_PROMPT))
+    }
+    val remaining = messages.dropWhile { it.role == "system" }.filter { it.role != "system" }
+    for (msg in remaining) {
+        result.add(msg)
+        if (msg.role == "user" && toolResults.isNotEmpty()) {
+            val toolCtx = toolResults.joinToString("\n\n").take(12000)
+            result.add(ChatMessage("ctx-${msg.id}", "user", "[工具结果]\n$toolCtx\n\n请根据上述工具结果继续推理，若已完成任务则输出 reply。"))
+        }
+    }
+    return result
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
+    sessionId: String?,
     title: String,
-    sessionId: String? = null,
-    onBack: () -> Unit,
-    onNewChat: () -> Unit,
-    onOpenTerminal: () -> Unit,
-    onOpenBrowser: (String?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBack: () -> Unit = {},
+    onNewChat: () -> Unit = {},
+    onOpenBrowser: (String?) -> Unit = {},
+    onOpenTerminal: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val chatStore = remember { ChatStore.from(context.applicationContext) }
-    val providerStore = remember { ProviderStore.from(context.applicationContext) }
-    val messages = remember { mutableStateListOf<ChatMessage>() }
+    val chatStore = remember { ChatStore(context) }
+    val providerStore = remember { ProviderStore(context) }
+    val scope = rememberCoroutineScope()
     var input by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var loadingLabel by remember { mutableStateOf("分析问题") }
     var menuExpanded by remember { mutableStateOf(false) }
+    val messages = remember { mutableStateListOf<ChatMessage>() }
+    val listState = rememberLazyListState()
     var streamingId by remember { mutableStateOf<String?>(null) }
     var streamTick by remember { mutableStateOf(0) }
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    val fileTools = FileTools
 
+    // Load existing session
     LaunchedEffect(sessionId) {
-        messages.clear()
-        if (sessionId != null) messages.addAll(chatStore.loadMessages(sessionId))
-        loading = false
-        loadingLabel = "分析问题"
+        if (sessionId != null) {
+            messages.clear()
+            messages.addAll(chatStore.loadMessages(sessionId))
+        }
     }
 
-    // Auto-follow: scroll to the newest message when the list grows or the
-    // typewriter pushes a reply card taller.
+    // Typewriter effect
+    LaunchedEffect(streamingId, streamTick) {
+        if (streamingId != null) {
+            val msg = messages.find { it.id == streamingId } ?: return@LaunchedEffect
+            if (streamTick < msg.content.length) {
+                delay(16)
+                streamTick = nextBoundary(msg.content, streamTick)
+            }
+        }
+    }
+
+    // Auto-scroll
     LaunchedEffect(messages.size, streamTick) {
-        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
     }
 
     fun persist() {
@@ -234,7 +413,6 @@ fun ChatScreen(
     suspend fun runAgent(providers: List<ProviderConfig>) {
         var candidates = providers
         val toolResults = mutableListOf<String>()
-        val fileTools = FileTools
         val fileBaseDir = fileTools.getBaseDir(context.applicationContext)
         repeat(MAX_AGENT_STEPS) {
             val failedAttempts = mutableListOf<RecoveryAttempt>()
@@ -406,24 +584,24 @@ fun ChatScreen(
     ) { innerPadding ->
         if (messages.isEmpty() && !loading) {
             Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         Icons.Outlined.AutoAwesome,
                         contentDescription = null,
-                        modifier = Modifier.size(56.dp),
+                        modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        "AgentT 智能助手",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        "开始对话",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "描述你的目标，AgentT 自主规划、执行、推进到完成。",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        "AgentT 可以调用工具来帮你完成各种任务",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                         textAlign = TextAlign.Center
                     )
                 }
@@ -436,7 +614,12 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(messages, key = { it.id }) { msg ->
-                    ChatBubble(msg, streamingId, streamTick)
+                    MessageBubble(
+                        msg = msg,
+                        isStreaming = msg.id == streamingId && streamTick < msg.content.length,
+                        streamTick = streamTick,
+                        onOpenBrowser = onOpenBrowser
+                    )
                 }
                 if (loading) {
                     item {
@@ -449,43 +632,42 @@ fun ChatScreen(
 }
 
 @Composable
-private fun ChatBubble(
+private fun MessageBubble(
     msg: ChatMessage,
-    streamingId: String?,
+    isStreaming: Boolean,
     streamTick: Int,
-    modifier: Modifier = Modifier
+    onOpenBrowser: (String) -> Unit = {}
 ) {
     val isUser = msg.role == "user"
-    val isStreaming = msg.id == streamingId
-    val isThink = msg.kind == "think"
-    val isTool = msg.kind == "tool"
-
+    val isSystem = msg.role == "system"
+    val kind = msg.kind
     val bubbleColor = when {
         isUser -> MaterialTheme.colorScheme.primaryContainer
-        isThink -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
-        isTool -> MaterialTheme.colorScheme.surfaceVariant
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        kind == "think" -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        kind == "tool" -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        else -> MaterialTheme.colorScheme.surfaceVariant
     }
+    val rowAlignment = if (isUser) Arrangement.End else Arrangement.Start
 
-    val align = if (isUser) Alignment.End else Alignment.Start
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = align
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = rowAlignment
     ) {
-        // Model label for assistant messages
-        if (!isUser && msg.model != null) {
-            Text(
-                msg.model,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
-            )
-        }
-
         when {
-            isThink -> {
-                // Think bubble: compact, italic, tertiary tint
+            isUser -> {
+                Surface(
+                    modifier = Modifier.widthIn(max = 320.dp),
+                    shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+                    color = bubbleColor
+                ) {
+                    Text(
+                        msg.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+            }
+            kind == "think" -> {
                 Row(
                     modifier = Modifier
                         .widthIn(max = 320.dp)
@@ -508,8 +690,7 @@ private fun ChatBubble(
                     )
                 }
             }
-            isTool -> {
-                // Tool result bubble: compact, monospace-like
+            kind == "tool" -> {
                 Row(
                     modifier = Modifier
                         .widthIn(max = 320.dp)
@@ -533,19 +714,6 @@ private fun ChatBubble(
                     )
                 }
             }
-            isUser -> {
-                Surface(
-                    modifier = Modifier.widthIn(max = 320.dp),
-                    shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
-                    color = bubbleColor
-                ) {
-                    Text(
-                        msg.content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
-                }
-            }
             else -> {
                 // Assistant reply with Markdown support
                 Surface(
@@ -558,13 +726,13 @@ private fun ChatBubble(
                         if (isStreaming) {
                             val displayText = msg.content.substring(0, minOf(msg.content.length, streamTick))
                             MarkdownText(
-                                text = displayText,
+                                markdown = displayText,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         } else {
                             MarkdownText(
-                                text = msg.content,
+                                markdown = msg.content,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
