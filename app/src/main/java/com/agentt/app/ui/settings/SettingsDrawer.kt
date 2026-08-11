@@ -1,37 +1,12 @@
 package com.agentt.app.ui.settings
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.DarkMode
-import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Extension
-import androidx.compose.material.icons.outlined.Face
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material.icons.outlined.SmartToy
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +23,7 @@ fun SettingsDrawer(
     onToggleDarkTheme: () -> Unit,
     onOpenProviders: () -> Unit,
     onOpenSandboxEnvironment: () -> Unit,
+    onOpenAssistants: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     ModalDrawerSheet(modifier = modifier.fillMaxWidth(0.86f)) {
@@ -83,7 +59,8 @@ fun SettingsDrawer(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         LazyColumn(modifier = Modifier.weight(1f)) {
-            item { SectionHeader("模型与服务") }
+            item { SectionHeader("助手与服务") }
+            item { SettingRow(Icons.Outlined.Face, "助手管理", "管理助手、标签与分组", onOpenAssistants) }
             item { SettingRow(Icons.Outlined.Dns, "供应商", "管理 API 供应商与密钥", onOpenProviders) }
             item { SettingRow(Icons.Outlined.SmartToy, "默认模型", "选择默认对话模型", {}) }
             item { SettingRow(Icons.Outlined.Search, "搜索服务", "配置联网搜索", {}) }
@@ -92,7 +69,6 @@ fun SettingsDrawer(
             item { SectionHeader("通用设置") }
             item { SettingRow(Icons.Outlined.Security, "沙盒环境", "环境变量与隐私模式", onOpenSandboxEnvironment) }
             item { SettingRow(Icons.Outlined.Tune, "偏好设置", "外观、行为与交互偏好", {}) }
-            item { SettingRow(Icons.Outlined.Face, "助手", "默认助手与对话风格", {}) }
             item {
                 SettingRow(
                     Icons.Outlined.DarkMode,

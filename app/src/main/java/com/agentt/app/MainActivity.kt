@@ -18,6 +18,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.agentt.app.ui.assistant.AssistantEditScreen
+import com.agentt.app.ui.assistant.AssistantsScreen
+import com.agentt.app.ui.assistant.TagManagerScreen
 import com.agentt.app.ui.browser.BrowserScreen
 import com.agentt.app.ui.chat.ChatScreen
 import com.agentt.app.ui.chat.ChatStore
@@ -31,7 +34,7 @@ import com.agentt.app.ui.web.WebTools
 import com.agentt.app.ui.workspace.WorkspaceScreen
 import kotlinx.coroutines.launch
 
-enum class Screen { Workspace, Chat, Providers, SandboxEnvironment, Browser, Terminal }
+enum class Screen { Workspace, Chat, Providers, SandboxEnvironment, Browser, Terminal, Assistants, AssistantEdit, TagManager }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,6 +49,7 @@ class MainActivity : ComponentActivity() {
                     var chatSessionId by rememberSaveable { mutableStateOf<String?>(null) }
                     var chatTitle by rememberSaveable { mutableStateOf("") }
                     var browserUrl by rememberSaveable { mutableStateOf("") }
+                    var editAssistantId by rememberSaveable { mutableStateOf("") }
                     fun openChat(sessionId: String, title: String) {
                         chatSessionId = sessionId
                         chatTitle = title
@@ -57,6 +61,7 @@ class MainActivity : ComponentActivity() {
                             onToggleDarkTheme = { darkTheme = !darkTheme },
                             onOpenProviders = { screen = Screen.Providers },
                             onOpenSandboxEnvironment = { screen = Screen.SandboxEnvironment },
+                            onOpenAssistants = { screen = Screen.Assistants },
                             onOpenChat = { id, title -> openChat(id, title) },
                             onNewChat = {
                                 val session = createChatSession(ChatStore.from(this@MainActivity))
@@ -82,6 +87,21 @@ class MainActivity : ComponentActivity() {
                         Screen.SandboxEnvironment -> SandboxEnvironmentScreen(onBack = { screen = Screen.Workspace })
                         Screen.Browser -> BrowserScreen(initialUrl = browserUrl, onBack = { screen = Screen.Chat })
                         Screen.Terminal -> TerminalScreen(onBack = { screen = Screen.Chat })
+                        Screen.Assistants -> AssistantsScreen(
+                            onBack = { screen = Screen.Workspace },
+                            onEditAssistant = { id ->
+                                editAssistantId = id
+                                screen = Screen.AssistantEdit
+                            },
+                            onManageTags = { screen = Screen.TagManager }
+                        )
+                        Screen.AssistantEdit -> AssistantEditScreen(
+                            assistantId = editAssistantId,
+                            onBack = { screen = Screen.Assistants }
+                        )
+                        Screen.TagManager -> TagManagerScreen(
+                            onBack = { screen = Screen.Assistants }
+                        )
                     }
                 }
             }
@@ -96,6 +116,7 @@ fun AppRoot(
     onToggleDarkTheme: () -> Unit,
     onOpenProviders: () -> Unit,
     onOpenSandboxEnvironment: () -> Unit,
+    onOpenAssistants: () -> Unit,
     onOpenChat: (String, String) -> Unit,
     onNewChat: () -> Unit
 ) {
@@ -114,6 +135,10 @@ fun AppRoot(
                 onOpenSandboxEnvironment = {
                     scope.launch { drawerState.close() }
                     onOpenSandboxEnvironment()
+                },
+                onOpenAssistants = {
+                    scope.launch { drawerState.close() }
+                    onOpenAssistants()
                 }
             )
         }

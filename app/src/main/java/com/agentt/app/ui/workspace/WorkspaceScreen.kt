@@ -1,62 +1,26 @@
 package com.agentt.app.ui.workspace
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.AddComment
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.agentt.app.ui.chat.ChatCategory
-import com.agentt.app.ui.chat.ChatSession
-import com.agentt.app.ui.chat.ChatStore
+import com.agentt.app.ui.chat.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,10 +36,18 @@ fun WorkspaceScreen(
 ) {
     val context = LocalContext.current
     val store = remember { ChatStore.from(context.applicationContext) }
+    val assistantStore = remember { AssistantStore.from(context.applicationContext) }
+    val tagStore = remember { TagStore.from(context.applicationContext) }
     val sessions = remember { mutableStateListOf<ChatSession>().apply { addAll(store.loadSessions()) } }
     val categories = remember { mutableStateListOf<ChatCategory>().apply { addAll(store.loadCategories()) } }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var showManageCategories by remember { mutableStateOf(false) }
+    var assistants by remember { mutableStateOf(assistantStore.load()) }
+    var currentAssistantId by remember { mutableStateOf(assistantStore.currentId()) }
+    var showAssistantPicker by remember { mutableStateOf(false) }
+    val tags = remember { tagStore.loadTags() }
+    val assignment = remember { tagStore.loadAssignment() }
+    val collapsedTags = remember { tagStore.loadCollapsed() }
 
     fun persistSessions() = store.saveSessions(sessions.toList())
     fun persistCategories() = store.saveCategories(categories.toList())
@@ -91,6 +63,7 @@ fun WorkspaceScreen(
     }
 
     val visibleSessions = if (selectedCategory == null) sessions else sessions.filter { it.categoryId == selectedCategory }
+    val currentAssistant = assistants.firstOrNull { it.id == currentAssistantId }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -118,6 +91,49 @@ fun WorkspaceScreen(
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            Surface(
+                onClick = { showAssistantPicker = true },
+                shape = RoundedCornerShape(0.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(32.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (currentAssistant?.avatar.isNullOrBlank()) (currentAssistant?.name?.take(1) ?: "A").uppercase()
+                            else currentAssistant!!.avatar.take(1),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            currentAssistant?.name ?: "默认助手",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (currentAssistant != null) {
+                            Text(
+                                if (currentAssistant.systemPrompt.isNotBlank()) "自定义提示词" else "默认提示词",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Icon(Icons.Outlined.SwapHoriz, contentDescription = "切换助手", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -142,39 +158,40 @@ fun WorkspaceScreen(
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
-                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(4.dp))
-                            Text("管理分类", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Icon(Icons.Outlined.FolderOpen, contentDescription = "管理分类", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
 
             if (visibleSessions.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                        Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f))
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            if (sessions.isEmpty()) "还没有对话\n点击右上角 + 新建对话" else "该分类下暂无对话",
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f)
-                        )
+                        Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f))
+                        Spacer(Modifier.height(18.dp))
+                        Text("还没有对话", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f))
+                        Spacer(Modifier.height(8.dp))
+                        Text("点击右上角 + 开始新对话", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(visibleSessions, key = { it.id }) { session ->
+                    items(visibleSessions.sortedByDescending { it.updatedAt }, key = { it.id }) { session ->
                         SessionCard(
                             session = session,
                             categoryName = categories.firstOrNull { it.id == session.categoryId }?.name,
-                            onClick = { onOpenChat(session.id, session.title) }
+                            onClick = { onOpenChat(session.id, session.title) },
+                            onDelete = {
+                                val idx = sessions.indexOfFirst { it.id == session.id }
+                                if (idx >= 0) {
+                                    sessions.removeAt(idx)
+                                    persistSessions()
+                                }
+                            }
                         )
                     }
                 }
@@ -182,17 +199,39 @@ fun WorkspaceScreen(
         }
     }
 
+    if (showAssistantPicker) {
+        AssistantPickerSheet(
+            assistants = assistants,
+            tags = tags,
+            assignment = assignment,
+            collapsedTags = collapsedTags,
+            currentAssistantId = currentAssistantId,
+            onSelect = { id ->
+                assistantStore.setCurrentId(id)
+                currentAssistantId = id
+                assistants = assistantStore.load()
+                showAssistantPicker = false
+            },
+            onDismiss = { showAssistantPicker = false },
+            onToggleCollapsed = { tagId ->
+                tagStore.toggleCollapsed(tagId)
+            }
+        )
+    }
+
     if (showManageCategories) {
         CategoryManageDialog(
             categories = categories.toList(),
             onAdd = { name ->
-                categories.add(ChatCategory(id = UUID.randomUUID().toString(), name = name))
+                categories.add(ChatCategory(UUID.randomUUID().toString(), name))
                 persistCategories()
             },
             onRename = { cat, name ->
                 val idx = categories.indexOfFirst { it.id == cat.id }
-                if (idx >= 0) categories[idx] = cat.copy(name = name)
-                persistCategories()
+                if (idx >= 0) {
+                    categories[idx] = cat.copy(name = name)
+                    persistCategories()
+                }
             },
             onDelete = { deleteCategory(it) },
             onDismiss = { showManageCategories = false }
@@ -201,18 +240,141 @@ fun WorkspaceScreen(
 }
 
 @Composable
+private fun AssistantPickerSheet(
+    assistants: List<AgentAssistant>,
+    tags: List<AgentTag>,
+    assignment: Map<String, String>,
+    collapsedTags: Map<String, Boolean>,
+    currentAssistantId: String?,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onToggleCollapsed: (String) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Face, contentDescription = null, tint = cs.primary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("选择助手")
+            }
+        },
+        text = {
+            Column {
+                tags.forEach { tag ->
+                    val tagAssistants = assistants.filter { assignment[it.id] == tag.id }
+                    if (tagAssistants.isNotEmpty()) {
+                        val isCollapsed = collapsedTags[tag.id] ?: false
+                        Surface(
+                            onClick = { onToggleCollapsed(tag.id) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    if (isCollapsed) Icons.Outlined.ChevronRight else Icons.Outlined.ArrowDropDown,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = cs.primary
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(Icons.Outlined.Bookmark, contentDescription = null, modifier = Modifier.size(14.dp), tint = cs.primary)
+                                Spacer(Modifier.width(4.dp))
+                                Text(tag.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = cs.primary)
+                            }
+                        }
+                        if (!isCollapsed) {
+                            tagAssistants.forEach { a ->
+                                AssistantPickerRow(a, a.id == currentAssistantId, onSelect)
+                            }
+                        }
+                    }
+                }
+                val unassigned = assistants.filter { !assignment.containsKey(it.id) }
+                if (unassigned.isNotEmpty()) {
+                    if (tags.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(4.dp))
+                        Text("未分组", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                    }
+                    unassigned.forEach { a ->
+                        AssistantPickerRow(a, a.id == currentAssistantId, onSelect)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+@Composable
+private fun AssistantPickerRow(
+    assistant: AgentAssistant,
+    isCurrent: Boolean,
+    onSelect: (String) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        onClick = { onSelect(assistant.id) },
+        shape = RoundedCornerShape(10.dp),
+        color = if (isCurrent) cs.primaryContainer.copy(alpha = 0.3f) else Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier.size(28.dp).clip(CircleShape)
+                    .background(if (isCurrent) cs.primary.copy(alpha = 0.2f) else cs.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (assistant.avatar.isNotBlank()) assistant.avatar.take(1) else assistant.name.take(1).uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isCurrent) cs.primary else cs.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                assistant.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (isCurrent) {
+                Icon(Icons.Outlined.Check, contentDescription = null, tint = cs.primary, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
 private fun SessionCard(
     session: ChatSession,
     categoryName: String?,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
     ) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
@@ -261,10 +423,7 @@ private fun CategoryManageDialog(
                 categories.forEach { cat ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(cat.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                        IconButton(
-                            onClick = { renameTarget = cat; inputName = cat.name; showInput = true },
-                            modifier = Modifier.size(32.dp)
-                        ) {
+                        IconButton(onClick = { renameTarget = cat; inputName = cat.name; showInput = true }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Outlined.Edit, contentDescription = "重命名", modifier = Modifier.size(18.dp))
                         }
                         IconButton(onClick = { onDelete(cat) }, modifier = Modifier.size(32.dp)) {
