@@ -1,9 +1,19 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+}
+
+fun getKeystoreProperties(): Properties {
+    val props = Properties()
+    val keystoreFile = rootProject.file("keystore.properties")
+    if (keystoreFile.exists()) {
+        keystoreFile.inputStream().use { props.load(it) }
+    }
+    return props
 }
 
 android {
@@ -19,13 +29,29 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        val keystoreProps = getKeystoreProperties()
+        if (keystoreProps["storeFile"] != null) {
+            create("persistent") {
+                storeFile = rootProject.file(keystoreProps["storeFile"]!!)
+                storePassword = keystoreProps["storePassword"] as? String ?: ""
+                keyAlias = keystoreProps["keyAlias"] as? String ?: ""
+                keyPassword = keystoreProps["keyPassword"] as? String ?: ""
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.findByName("persistent") ?: signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.findByName("persistent") ?: signingConfigs.getByName("debug")
         }
     }
 
