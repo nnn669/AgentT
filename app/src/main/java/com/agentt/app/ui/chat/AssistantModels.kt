@@ -178,7 +178,7 @@ class TagStore(private val prefs: SharedPreferences) {
         val raw = prefs.getString(KEY_ASSIGN, null) ?: return emptyMap()
         return try {
             val o = JSONObject(raw)
-            o.keySet().associateWith { o.optString(it) }
+            jsonObjectKeys(o).associateWith { o.optString(it) }
         } catch (_: Exception) { emptyMap() }
     }
 
@@ -190,7 +190,7 @@ class TagStore(private val prefs: SharedPreferences) {
         val raw = prefs.getString(KEY_COLLAPSED, null) ?: return emptyMap()
         return try {
             val o = JSONObject(raw)
-            o.keySet().associateWith { o.optBoolean(it) }
+            jsonObjectKeys(o).associateWith { o.optBoolean(it) }
         } catch (_: Exception) { emptyMap() }
     }
 
@@ -244,4 +244,10 @@ class TagStore(private val prefs: SharedPreferences) {
         fun from(context: Context): TagStore =
             TagStore(context.getSharedPreferences("agentt_tags", Context.MODE_PRIVATE))
     }
+}
+
+/** Helper: extract keys from a JSONObject using names() for Android compatibility. */
+private fun jsonObjectKeys(o: JSONObject): Set<String> {
+    val names = o.names() ?: return emptySet()
+    return buildSet { for (i in 0 until names.length()) add(names.optString(i)) }
 }
