@@ -54,7 +54,8 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SandboxEnvironmentScreen(onBack: () -> Unit) {
-    val store = remember { SandboxEnvironmentStore.from(LocalContext.current) }
+    val context = LocalContext.current
+    val store = remember(context) { SandboxEnvironmentStore.from(context) }
     var variables by remember { mutableStateOf(store.variables()) }
     var privacyMode by rememberSaveable { mutableStateOf(store.privacyMode) }
     var adding by rememberSaveable { mutableStateOf(false) }
@@ -127,19 +128,22 @@ fun SandboxEnvironmentScreen(onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(variable.name, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                                Text(variable.name, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
                                 Text(
                                     if (revealed[variable.name] == true) variable.value else SandboxVariableRules.mask(variable.value),
                                     fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 5.dp)
-                                )
-                                if (variable.description.isNotBlank()) Text(
-                                    variable.description,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 5.dp)
+                                    modifier = Modifier.padding(top = 4.dp)
                                 )
+                                if (variable.description.isNotBlank()) {
+                                    Text(
+                                        variable.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
                             }
                             IconButton(onClick = { revealed[variable.name] = revealed[variable.name] != true }) {
                                 Icon(
@@ -152,8 +156,9 @@ fun SandboxEnvironmentScreen(onBack: () -> Unit) {
                             }
                             IconButton(onClick = {
                                 store.delete(variable.name)
+                                revealed.remove(variable.name)
                                 variables = store.variables()
-                            }) { Icon(Icons.Outlined.Delete, "删除", tint = MaterialTheme.colorScheme.error) }
+                            }) { Icon(Icons.Outlined.Delete, "删除") }
                         }
                     }
                 }
@@ -161,20 +166,17 @@ fun SandboxEnvironmentScreen(onBack: () -> Unit) {
         }
     }
 
-    if (adding) AddVariableDialog(
-        onDismiss = { adding = false },
-        onSave = { name, value, description ->
-            store.put(name, value, description)
-            variables = store.variables()
-            adding = false
-        }
-    )
+    if (adding) {
+        AddVariableDialog(
+            onDismiss = { adding = false },
+            onSave = { name, value, description ->
+                store.put(name, value, description)
+                variables = store.variables()
+                adding = false
+            }
+        )
+    }
 }
-
-@Composable
-private fun sandboxCardColors() = CardDefaults.cardColors(
-    containerColor = MaterialTheme.colorScheme.surfaceContainer
-)
 
 @Composable
 private fun SectionLabel(text: String) {
@@ -182,9 +184,14 @@ private fun SectionLabel(text: String) {
         text,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(4.dp)
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
     )
 }
+
+@Composable
+private fun sandboxCardColors() = CardDefaults.cardColors(
+    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
+)
 
 @Composable
 private fun AddVariableDialog(onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
@@ -216,7 +223,10 @@ private fun AddVariableDialog(onDismiss: () -> Unit, onSave: (String, String, St
                     visualTransformation = if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         IconButton(onClick = { revealed = !revealed }) {
-                            Icon(if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (revealed) "隐藏" else "显示")
+                            Icon(
+                                if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                if (revealed) "隐藏" else "显示"
+                            )
                         }
                     },
                     singleLine = true
