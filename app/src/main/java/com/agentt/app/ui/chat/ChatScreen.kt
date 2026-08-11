@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -406,188 +407,212 @@ fun ChatScreen(
         if (messages.isEmpty() && !loading) {
             Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f))
-                    Spacer(Modifier.height(18.dp))
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(56.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                    )
+                    Spacer(Modifier.height(16.dp))
                     Text(
-                        "你好，我是 AgentT\n在下方输入消息开始对话",
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f)
+                        "AgentT 智能助手",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "描述你的目标，AgentT 自主规划、执行、推进到完成。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        textAlign = TextAlign.Center
                     )
                 }
             }
         } else {
             LazyColumn(
-                state = listState,
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                state = listState,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(messages, key = { it.id }) { m ->
-                    when {
-                        m.role == "user" -> UserBubble(m.content)
-                        m.kind == "think" -> ThinkCard(m.content)
-                        m.kind == "tool" -> ToolCard(m.content)
-                        else -> AgentCard(
-                            content = m.content,
-                            model = m.model,
-                            streaming = m.id == streamingId,
-                            onTick = { streamTick++ }
-                        )
+                items(messages, key = { it.id }) { msg ->
+                    ChatBubble(msg, streamingId, streamTick)
+                }
+                if (loading) {
+                    item {
+                        LoadingIndicator(loadingLabel)
                     }
                 }
-                if (loading) item { AgentThinking(loadingLabel) }
             }
         }
     }
 }
 
 @Composable
-private fun UserBubble(content: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Surface(
-            shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.widthIn(max = 320.dp)
-        ) {
+private fun ChatBubble(
+    msg: ChatMessage,
+    streamingId: String?,
+    streamTick: Int,
+    modifier: Modifier = Modifier
+) {
+    val isUser = msg.role == "user"
+    val isStreaming = msg.id == streamingId
+    val isThink = msg.kind == "think"
+    val isTool = msg.kind == "tool"
+
+    val bubbleColor = when {
+        isUser -> MaterialTheme.colorScheme.primaryContainer
+        isThink -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+        isTool -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+    }
+
+    val align = if (isUser) Alignment.End else Alignment.Start
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = align
+    ) {
+        // Model label for assistant messages
+        if (!isUser && msg.model != null) {
             Text(
-                content,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                msg.model,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
             )
         }
-    }
-}
 
-@Composable
-private fun AgentCard(
-    content: String,
-    model: String?,
-    streaming: Boolean,
-    onTick: () -> Unit
-) {
-    var displayed by remember { mutableStateOf(if (streaming) "" else content) }
-
-    LaunchedEffect(streaming, content) {
-        if (streaming) {
-            displayed = ""
-            var pos = 0
-            while (pos < content.length) {
-                val next = nextBoundary(content, pos)
-                displayed = content.substring(0, next)
-                pos = next
-                onTick()
-                delay(48L)
-            }
-        } else {
-            displayed = content
-        }
-    }
-
-    Row(Modifier.fillMaxWidth()) {
-        Surface(
-            shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.widthIn(max = 360.dp)
-        ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                MarkdownText(
-                    markdown = displayed,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                if (model != null) {
-                    Spacer(Modifier.height(6.dp))
+        when {
+            isThink -> {
+                // Think bubble: compact, italic, tertiary tint
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 320.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(bubbleColor)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Text(
-                        model,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        msg.content,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ThinkCard(content: String) {
-    Row(Modifier.fillMaxWidth()) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-            modifier = Modifier.widthIn(max = 340.dp)
-        ) {
-            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
-                Icon(
-                    Icons.Outlined.Bolt,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp).padding(top = 2.dp),
-                    tint = MaterialTheme.colorScheme.secondary
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    content,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
+            isTool -> {
+                // Tool result bubble: compact, monospace-like
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 320.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(bubbleColor)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Outlined.Bolt,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (msg.content.length > 100) msg.content.take(100) + "…" else msg.content,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        maxLines = 3
+                    )
+                }
+            }
+            isUser -> {
+                Surface(
+                    modifier = Modifier.widthIn(max = 320.dp),
+                    shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+                    color = bubbleColor
+                ) {
+                    Text(
+                        msg.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+            }
+            else -> {
+                // Assistant reply with Markdown support
+                Surface(
+                    modifier = Modifier.widthIn(max = 400.dp),
+                    shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
+                    color = bubbleColor,
+                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        if (isStreaming) {
+                            val displayText = msg.content.substring(0, minOf(msg.content.length, streamTick))
+                            MarkdownText(
+                                text = displayText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        } else {
+                            MarkdownText(
+                                text = msg.content,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        if (isStreaming && streamTick < msg.content.length) {
+                            Spacer(Modifier.height(4.dp))
+                            val blinkAlpha = rememberInfiniteTransition("blink").animateFloat(
+                                initialValue = 1f, targetValue = 0.3f,
+                                animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse)
+                            )
+                            Text(
+                                "▌",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = blinkAlpha.value)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ToolCard(content: String) {
-    Row(Modifier.fillMaxWidth()) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-            modifier = Modifier.widthIn(max = 340.dp)
-        ) {
-            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
-                Icon(
-                    Icons.Outlined.Terminal,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp).padding(top = 2.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    content,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AgentThinking(label: String) {
-    val infinite = rememberInfiniteTransition(label = "thinking")
-    val alpha by infinite.animateFloat(
-        initialValue = 0.35f, targetValue = 0.9f,
-        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "pulse"
-    )
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ) {
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
-                )
-            }
-        }
+private fun LoadingIndicator(label: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val alpha = rememberInfiniteTransition("loading").animateFloat(
+            initialValue = 0.3f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse)
+        )
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha.value))
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha.value)
+        )
     }
 }
 
