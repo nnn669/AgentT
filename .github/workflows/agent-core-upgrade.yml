@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/agent-core-upgrade.yml'
+      - '.github/scripts/agent_core_upgrade.py'
 
 permissions:
   contents: write
@@ -25,10 +26,26 @@ jobs:
       - name: Apply autonomous agent runtime upgrade
         run: python3 .github/scripts/agent_core_upgrade.py
       - name: Unit tests and debug compile
-        run: gradle testDebugUnitTest assembleDebug --no-daemon --stacktrace
-      - name: Commit verified implementation
+        id: verify
+        continue-on-error: true
+        shell: bash
         run: |
-          rm -f .github/workflows/agent-core-upgrade.yml .github/scripts/agent_core_upgrade.py
+          set -o pipefail
+          gradle testDebugUnitTest assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/agent-core-gradle.log
+      - name: Commit diagnostics on failure
+        if: steps.verify.outcome == 'failure'
+        run: |
+          tail -n 350 /tmp/agent-core-gradle.log > agent-core-diagnostics.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add agent-core-diagnostics.txt
+          git commit -m 'chore: record agent core build diagnostics'
+          git push
+          exit 1
+      - name: Commit verified implementation
+        if: steps.verify.outcome == 'success'
+        run: |
+          rm -f .github/workflows/agent-core-upgrade.yml .github/scripts/agent_core_upgrade.py agent-core-diagnostics.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
