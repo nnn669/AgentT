@@ -155,23 +155,24 @@ private fun chatAnthropic(p: ProviderConfig, history: List<ChatMessage>): String
 
 private fun chatGemini(p: ProviderConfig, history: List<ChatMessage>): String {
     val parts = JSONArray()
-    for (msg in history) {
-        parts.put(JSONObject().put("role", if (msg.role == "assistant") "model" else "user").put("parts", JSONArray().put(JSONObject().put("text", msg.content))))
-    }
+    val last = history.lastOrNull() ?: return ""
+    parts.put(JSONObject().put("text", last.content))
     val r = httpJson(
         "POST", p.baseUrl.trimEnd('/') + "/v1beta/models/${p.mainModel}:generateContent",
         mapOf("x-goog-api-key" to p.apiKey),
-        JSONObject().put("contents", parts).put("generationConfig", JSONObject().put("maxOutputTokens", 4096))
+        JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", parts)))
+            .put("generationConfig", JSONObject().put("maxOutputTokens", 4096))
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
-    return JSONObject(r.body).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
+    return JSONObject(r.body).optJSONArray("candidates")?.optJSONObject(0)
+        ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
         ?: throw RuntimeException("响应中无内容")
 }
 
 private fun chatOllama(p: ProviderConfig, history: List<ChatMessage>): String {
     val r = httpJson(
         "POST", p.baseUrl.trimEnd('/') + "/api/chat",
-        mapOf<String, String>(),
+        emptyMap(),
         JSONObject().put("model", p.mainModel).put("stream", false).put("messages", chatMessages(history))
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
@@ -179,59 +180,13 @@ private fun chatOllama(p: ProviderConfig, history: List<ChatMessage>): String {
         ?: throw RuntimeException("响应中无内容")
 }
 
-data class ChatMessage(
-    val id: String,
-    val role: String,
-    val content: String,
-    val model: String? = null,
-    val kind: String = "text"
-)
+data class RecoveryAttempt(val provider: String, val model: String, val attempt: Int, val error: String? = null)
+data class RecoveryResult(val provider: ProviderConfig, val model: String, val reply: ChatMessage)
 
-data class RecoveryAttempt(
-    val provider: String,
-    val model: String,
-    val attempt: Int,
-    val error: String? = null
-)
-
-data class RecoveryResult(
-    val provider: ProviderConfig,
-    val model: String,
-    val reply: ChatMessage
-)
-
-data class Action(
-    val type: String,
-    val tool: String? = null,
-    val url: String? = null,
-    val query: String? = null,
-    val path: String? = null,
-    val content: String? = null,
-    val payload: String? = null
-)
-
-fun parseActionStream(json: String): List<Action>? = runCatching {
-    val o = JSONObject(json)
-    val arr = o.optJSONArray("actions") ?: return@runCatching null
-    buildList<Action> {
-        for (i in 0 until arr.length()) {
-            val a = arr.getJSONObject(i)
-            add(Action(
-                type = a.optString("type"),
-                tool = a.optString("tool", null),
-                url = a.optString("url", null),
-                query = a.optString("query", null),
-                path = a.optString("path", null),
-                content = a.optString("content", null),
-                payload = a.optString("payload", null)
-            ))
-        }
-    }
-}.getOrNull()
-
-suspend fun recoverChatWithProviders(
+private suspend fun recoverChatWithProviders(
     providers: List<ProviderConfig>,
     history: List<ChatMessage>,
+    systemPrompt: String = SYSTEM_PROMPT,
     onAttempt: (RecoveryAttempt) -> Unit = {}
 ): RecoveryResult? {
     for (provider in providers) {
@@ -247,7 +202,7 @@ suspend fun recoverChatWithProviders(
             val modelToUse = if (attempt == 1) preferred else provider.models.getOrNull(attempt - 1) ?: preferred
             val p = provider.copy(models = listOf(modelToUse) + provider.models.filter { it != modelToUse })
             onAttempt(attemptInfo.copy(error = null))
-            val result = chatWithProvider(p, listOf(ChatMessage("sys", "system", SYSTEM_PROMPT)) + history)
+            val result = chatWithProvider(p, listOf(ChatMessage("sys", "system", systemPrompt)) + history)
             if (result.ok) {
                 val msg = ChatMessage(
                     UUID.randomUUID().toString(), "assistant", result.content,
@@ -336,12 +291,12 @@ object TerminalAgentTool {
     }
 }
 
-private fun buildAgentHistory(messages: List<ChatMessage>, toolResults: List<String>): List<ChatMessage> {
+private fun buildAgentHistory(messages: List<ChatMessage>, toolResults: List<String>, systemPrompt: String = SYSTEM_PROMPT): List<ChatMessage> {
     val result = mutableListOf<ChatMessage>()
     if (messages.isNotEmpty() && messages.first().role == "system") {
         result.add(messages.first())
     } else {
-        result.add(ChatMessage("sys", "system", SYSTEM_PROMPT))
+        result.add(ChatMessage("sys", "system", systemPrompt))
     }
     val remaining = messages.dropWhile { it.role == "system" }.filter { it.role != "system" }
     for (msg in remaining) {
@@ -353,6 +308,46 @@ private fun buildAgentHistory(messages: List<ChatMessage>, toolResults: List<Str
     }
     return result
 }
+
+private fun parseActionStream(text: String): List<Action>? {
+    val json = try {
+        val s = text.trim()
+        if (s.startsWith("```")) {
+            val start = s.indexOf('\n')
+            if (start < 0) return null
+            val end = s.lastIndexOf("```")
+            if (end <= start) return null
+            JSONObject(s.substring(start, end).trim())
+        } else {
+            JSONObject(s)
+        }
+    } catch (_: Exception) { return null }
+    val actions = json.optJSONArray("actions") ?: return null
+    return buildList {
+        for (i in 0 until actions.length()) {
+            val a = actions.getJSONObject(i)
+            add(Action(
+                type = a.optString("type"),
+                tool = a.optString("tool").ifBlank { null },
+                url = a.optString("url").ifBlank { null },
+                query = a.optString("query").ifBlank { null },
+                content = a.optString("content").ifBlank { null },
+                path = a.optString("path").ifBlank { null },
+                payload = a.optString("payload").ifBlank { null }
+            ))
+        }
+    }
+}
+
+data class Action(
+    val type: String,
+    val tool: String? = null,
+    val url: String? = null,
+    val query: String? = null,
+    val content: String? = null,
+    val path: String? = null,
+    val payload: String? = null
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -368,6 +363,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val chatStore = remember { ChatStore.from(context) }
     val providerStore = remember { ProviderStore.from(context) }
+    val assistantStore = remember { AssistantStore.from(context.applicationContext) }
     val scope = rememberCoroutineScope()
     var input by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
@@ -416,7 +412,7 @@ fun ChatScreen(
         persist()
     }
 
-    suspend fun runAgent(providers: List<ProviderConfig>) {
+    suspend fun runAgent(providers: List<ProviderConfig>, systemPrompt: String = SYSTEM_PROMPT) {
         var candidates = providers
         val toolResults = mutableListOf<String>()
         val fileBaseDir: File = fileTools.getBaseDir(context.applicationContext)
@@ -424,7 +420,8 @@ fun ChatScreen(
             val failedAttempts = mutableListOf<RecoveryAttempt>()
             val recovery = recoverChatWithProviders(
                 providers = candidates,
-                history = buildAgentHistory(messages.toList(), toolResults),
+                history = buildAgentHistory(messages.toList(), toolResults, systemPrompt),
+                systemPrompt = systemPrompt,
                 onAttempt = { attempt ->
                     if (attempt.error != null) failedAttempts += attempt
                     loadingLabel = when {
@@ -553,13 +550,25 @@ fun ChatScreen(
         loading = true
         loadingLabel = "分析问题"
         scope.launch {
-            val providers = providerStore.load()
+            val assistant = assistantStore.currentAssistant()
+            val systemPrompt = if (assistant?.systemPrompt?.isNotBlank() == true) {
+                assistant.systemPrompt
+            } else {
+                SYSTEM_PROMPT
+            }
+            val allProviders = providerStore.load()
+            val providers = if (assistant?.providerId?.isNotBlank() == true) {
+                val matched = allProviders.filter { it.id == assistant.providerId }
+                if (matched.isNotEmpty()) matched else allProviders
+            } else {
+                allProviders
+            }
             if (providers.isEmpty()) {
                 addReply("请先在设置中添加供应商（如 OpenAI）和模型。", null)
                 loading = false
                 return@launch
             }
-            runAgent(providers)
+            runAgent(providers, systemPrompt)
             loading = false
         }
     }
@@ -571,8 +580,7 @@ fun ChatScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        Text("AgentT 助手", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     }
                 },
                 navigationIcon = {
@@ -582,8 +590,8 @@ fun ChatScreen(
                 },
                 actions = {
                     Box {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(Icons.Outlined.Add, contentDescription = "更多", tint = MaterialTheme.colorScheme.onSurface)
+                        IconButton(onClick = { menuExpanded = !menuExpanded }) {
+                            Icon(Icons.Outlined.AutoAwesome, contentDescription = "更多", tint = MaterialTheme.colorScheme.onSurface)
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             DropdownMenuItem(
@@ -596,67 +604,52 @@ fun ChatScreen(
                                 onClick = { menuExpanded = false; onOpenTerminal() },
                                 leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null) }
                             )
-                            DropdownMenuItem(
-                                text = { Text("打开浏览器") },
-                                onClick = { menuExpanded = false; onOpenBrowser(null) },
-                                leadingIcon = { Icon(Icons.Outlined.Public, contentDescription = null) }
-                            )
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
-        },
-        bottomBar = {
-            ChatInputBar(
-                value = input,
-                onValueChange = { input = it },
-                onSend = { send() },
-                enabled = !loading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
-            )
         }
     ) { innerPadding ->
-        if (messages.isEmpty() && !loading) {
-            Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "开始对话",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "AgentT 可以调用工具来帮你完成各种任务",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                        textAlign = TextAlign.Center
-                    )
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding).navigationBarsPadding()) {
+            if (messages.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "开始与 AgentT 对话",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "AgentT 可以调用工具来帮你完成各种任务",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(messages, key = { it.id }) { msg ->
-                    MessageBubble(
-                        msg = msg,
-                        isStreaming = msg.id == streamingId && streamTick < msg.content.length,
-                        streamTick = if (msg.id == streamingId) streamTick else msg.content.length
-                    )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                    state = listState,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(messages, key = { it.id }) { msg ->
+                        MessageBubble(
+                            msg = msg,
+                            isStreaming = msg.id == streamingId && streamTick < msg.content.length,
+                            streamTick = if (msg.id == streamingId) streamTick else msg.content.length
+                        )
+                    }
                 }
             }
         }
