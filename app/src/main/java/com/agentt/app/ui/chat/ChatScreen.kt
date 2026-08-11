@@ -81,7 +81,7 @@ import java.util.UUID
 
 const val MAX_AGENT_STEPS = 5
 
-private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓手机上。你通过"动作流"来完成任务。
+private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓手机上（Android 本机环境，无 root 权限，无默认 Git/Node.js/Python 等运行时）。你通过"动作流"来完成任务。
 你可以调用内置工具获取实时信息：
 - browser.search(query)：搜索互联网
 - browser.extract(url)：抓取网页正文
@@ -93,6 +93,7 @@ private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓�
 - file.write(path, content)：写入文本文件
 - file.stat(path)：查看文件信息
 - file.delete(path)：删除文件
+- terminal.execute(command)：在本地 Shell 中执行命令（无 root 权限，仅限可访问的目录）
 
 你的输出必须是 JSON 动作流，不要输出任何其它文字，格式如下：
 {"actions":[{"type":"think","content":"你的推理"},{"type":"tool","tool":"browser.extract","url":"https://example.com"},{"type":"reply","content":"最终回答"}]}
@@ -100,10 +101,11 @@ private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓�
 规则：
 1. type 只能是 think（推理）、tool（调用工具，带 tool 字段指定工具名）、reply（最终回复）。
 2. 文件工具：file.read/write 带 path 和可选的 content；file.list/stat/delete 带 path。
-3. 工具结果会自动回传给你，你再继续推理。
-4. 如果一次动作流里没有 reply，你会收到工具结果后继续，直到给出 reply。
-5. 不需要工具时，直接输出 {"actions":[{"type":"reply","content":"回答"}]}。
-6. reply 的 content 是最终展示给用户的内容，使用与用户相同的语言。"""
+3. 终端工具：terminal.execute 带 command（要执行的命令）或 payload 字段。
+4. 工具结果会自动回传给你，你再继续推理。
+5. 如果一次动作流里没有 reply，你会收到工具结果后继续，直到给出 reply。
+6. 不需要工具时，直接输出 {"actions":[{"type":"reply","content":"回答"}]}。
+7. reply 的 content 是最终展示给用户的内容，使用与用户相同的语言。"""
 
 data class ChatReply(val ok: Boolean, val content: String, val error: String?)
 
@@ -652,14 +654,8 @@ fun ChatScreen(
                     MessageBubble(
                         msg = msg,
                         isStreaming = msg.id == streamingId && streamTick < msg.content.length,
-                        streamTick = streamTick,
-                        onOpenBrowser = onOpenBrowser
+                        streamTick = if (msg.id == streamingId) streamTick else msg.content.length
                     )
-                }
-                if (loading) {
-                    item {
-                        LoadingIndicator(loadingLabel)
-                    }
                 }
             }
         }
@@ -670,36 +666,48 @@ fun ChatScreen(
 private fun MessageBubble(
     msg: ChatMessage,
     isStreaming: Boolean,
-    streamTick: Int,
-    onOpenBrowser: (String) -> Unit = {}
+    streamTick: Int
 ) {
     val isUser = msg.role == "user"
-    val isSystem = msg.role == "system"
-    val kind = msg.kind
-    val bubbleColor = when {
-        isUser -> MaterialTheme.colorScheme.primaryContainer
-        kind == "think" -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-        kind == "tool" -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val rowAlignment = if (isUser) Arrangement.End else Arrangement.Start
+    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant
 
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = rowAlignment
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
+        val kind = msg.kind.ifBlank { "text" }
         when {
-            isUser -> {
+            kind == "text" || kind == "reply" -> {
                 Surface(
-                    modifier = Modifier.widthIn(max = 320.dp),
-                    shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
+                    shape = RoundedCornerShape(
+                        topStart = 16.dp, topEnd = 16.dp,
+                        bottomStart = if (isUser) 16.dp else 4.dp,
+                        bottomEnd = if (isUser) 4.dp else 16.dp
+                    ),
                     color = bubbleColor
                 ) {
-                    Text(
-                        msg.content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        if (isStreaming) {
+                            Text(
+                                msg.content.take(streamTick),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        } else {
+                            MarkdownText(
+                                markdown = msg.content,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        if (msg.model != null) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                msg.model,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            )
+                        }
+                    }
                 }
             }
             kind == "think" -> {
@@ -744,26 +752,7 @@ private fun MessageBubble(
                     Text(
                         if (msg.content.length > 100) msg.content.take(100) + "…" else msg.content,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        maxLines = 3
-                    )
-                }
-            }
-            else -> {
-                // Assistant reply with Markdown support
-                Surface(
-                    modifier = Modifier.widthIn(max = 400.dp),
-                    shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
-                    color = bubbleColor,
-                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                ) {
-                    val displayText = if (isStreaming) msg.content.take(streamTick) else msg.content
-                    MarkdownText(
-                        text = displayText,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        onOpenUrl = { url -> onOpenBrowser(url) }
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                 }
             }
@@ -772,31 +761,30 @@ private fun MessageBubble(
 }
 
 @Composable
-private fun LoadingIndicator(label: String) {
+private fun TypingIndicator(
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "typing")
+    val alpha = infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
+        modifier = modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        val alpha = rememberInfiniteTransition("loading").animateFloat(
-            initialValue = 0.3f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse)
-        )
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha.value))
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha.value)
-        )
+        repeat(3) {
+            Box(
+                Modifier.size(6.dp).clip(CircleShape).background(
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = alpha.value)
+                )
+            )
+        }
     }
 }
 
