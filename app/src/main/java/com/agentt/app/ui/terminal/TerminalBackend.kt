@@ -2,8 +2,10 @@ package com.agentt.app.ui.terminal
 
 import android.content.Context
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -74,10 +76,16 @@ class LocalTerminalBackend(context: Context) : TerminalBackend {
             .start()
         running.put(request.sessionId, process)?.destroyForcibly()
 
+        val budget = request.maxOutputChars.coerceAtLeast(1)
+        val truncated = AtomicBoolean(false)
         var stdout = ""
         var stderr = ""
-        val outThread = Thread { stdout = process.inputStream.bufferedReader().use { it.readText() } }
-        val errThread = Thread { stderr = process.errorStream.bufferedReader().use { it.readText() } }
+        val outThread = Thread {
+            stdout = process.inputStream.readLimited(budget, truncated)
+        }
+        val errThread = Thread {
+            stderr = process.errorStream.readLimited(budget, truncated)
+        }
         outThread.isDaemon = true
         errThread.isDaemon = true
         outThread.start()
@@ -89,8 +97,6 @@ class LocalTerminalBackend(context: Context) : TerminalBackend {
         errThread.join(1_000)
         running.remove(request.sessionId, process)
 
-        val combinedLength = stdout.length + stderr.length
-        val budget = request.maxOutputChars.coerceAtLeast(1)
         val safeStdout = stdout.take(budget)
         val safeStderr = stderr.take((budget - safeStdout.length).coerceAtLeast(0))
         TerminalResult(
@@ -98,11 +104,26 @@ class LocalTerminalBackend(context: Context) : TerminalBackend {
             stderr = safeStderr,
             exitCode = if (finished) process.exitValue() else -1,
             timedOut = !finished,
-            truncated = combinedLength > budget
+            truncated = truncated.get() || stdout.length + stderr.length > budget
         )
     }
 
     override fun cancel(sessionId: String) {
         running.remove(sessionId)?.destroyForcibly()
     }
+}
+
+private fun InputStream.readLimited(limit: Int, truncated: AtomicBoolean): String {
+    val result = StringBuilder(minOf(limit, 8_192))
+    bufferedReader().use { reader ->
+        val buffer = CharArray(4_096)
+        while (true) {
+            val count = reader.read(buffer)
+            if (count < 0) break
+            val remaining = limit - result.length
+            if (remaining > 0) result.append(buffer, 0, minOf(count, remaining))
+            if (count > remaining) truncated.set(true)
+        }
+    }
+    return result.toString()
 }
