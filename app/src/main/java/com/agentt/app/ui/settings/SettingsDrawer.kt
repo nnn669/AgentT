@@ -20,6 +20,7 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Tune
@@ -46,6 +47,7 @@ fun SettingsDrawer(
     darkTheme: Boolean,
     onToggleDarkTheme: () -> Unit,
     onOpenProviders: () -> Unit,
+    onOpenSandboxEnvironment: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     ModalDrawerSheet(modifier = modifier.fillMaxWidth(0.86f)) {
@@ -71,11 +73,7 @@ fun SettingsDrawer(
             }
             Spacer(Modifier.width(12.dp))
             Column {
-                Text(
-                    "AgentT",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text("AgentT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
                     "原生 Android Agent 应用",
                     style = MaterialTheme.typography.bodySmall,
@@ -92,15 +90,16 @@ fun SettingsDrawer(
             item { SettingRow(Icons.Outlined.Extension, "MCP", "模型上下文协议服务", {}) }
 
             item { SectionHeader("通用设置") }
+            item { SettingRow(Icons.Outlined.Security, "沙盒环境", "环境变量与隐私模式", onOpenSandboxEnvironment) }
             item { SettingRow(Icons.Outlined.Tune, "偏好设置", "外观、行为与交互偏好", {}) }
             item { SettingRow(Icons.Outlined.Face, "助手", "默认助手与对话风格", {}) }
             item {
                 SettingRow(
-                    Icons.Outlined.DarkMode, "颜色模式", if (darkTheme) "深色" else "浅色",
+                    Icons.Outlined.DarkMode,
+                    "颜色模式",
+                    if (darkTheme) "深色" else "浅色",
                     onToggleDarkTheme,
-                    trailing = {
-                        Switch(checked = darkTheme, onCheckedChange = { onToggleDarkTheme() })
-                    }
+                    trailing = { Switch(checked = darkTheme, onCheckedChange = { onToggleDarkTheme() }) }
                 )
             }
 
@@ -137,15 +136,11 @@ private fun SettingRow(
                     )
                 }
             }
-            if (trailing != null) {
-                trailing()
-            } else {
-                Icon(
-                    Icons.Outlined.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-            }
+            if (trailing != null) trailing() else Icon(
+                Icons.Outlined.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
         }
     }
 }
