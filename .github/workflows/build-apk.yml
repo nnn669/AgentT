@@ -1,8 +1,6 @@
 name: build-apk
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -25,7 +23,7 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Verify (tests) then build debug APK
+      - name: Verify tests then build debug APK
         run: gradle testDebugUnitTest assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK to artifact
@@ -40,6 +38,6 @@ jobs:
         with:
           tag_name: continuous
           name: Continuous Build
-          body: 每次 main 分支构建自动更新的 APK（直接下载，无需解压）
+          body: 每次确认构建后更新的 APK（直接下载，无需解压）
           files: app/build/outputs/apk/debug/app-debug.apk
           fail_on_unmatched_files: true
