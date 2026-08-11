@@ -24,6 +24,7 @@ fun SettingsDrawer(
     onOpenProviders: () -> Unit,
     onOpenSandboxEnvironment: () -> Unit,
     onOpenAssistants: () -> Unit,
+    onOpenFileBrowser: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     ModalDrawerSheet(modifier = modifier.fillMaxWidth(0.86f)) {
@@ -80,6 +81,7 @@ fun SettingsDrawer(
             }
 
             item { SectionHeader("数据设置") }
+            item { SettingRow(Icons.Outlined.Folder, "文件管理器", "浏览、读写设备文件", onOpenFileBrowser) }
             item { SettingRow(Icons.Outlined.Backup, "数据备份", "备份与恢复聊天记录", {}) }
             item { SettingRow(Icons.Outlined.Storage, "聊天记录存储", "存储位置与空间管理", {}) }
         }

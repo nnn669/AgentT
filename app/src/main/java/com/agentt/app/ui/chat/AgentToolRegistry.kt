@@ -27,7 +27,12 @@ object AgentToolRegistry {
         AgentToolSpec("browser.title", "读取网页标题", "url:string"),
         AgentToolSpec("browser.links", "提取网页链接", "url:string"),
         AgentToolSpec("browser.open", "在应用内浏览器打开网页", "url:string"),
-        AgentToolSpec("terminal.exec", "在 AgentT 私有沙盒执行命令，应用会自动尝试恢复缺少的软件包", "command:string, backend?:LOCAL, timeout_ms?:1000..120000")
+        AgentToolSpec("terminal.exec", "在 AgentT 私有沙盒执行命令，应用会自动尝试恢复缺少的软件包", "command:string, backend?:LOCAL, timeout_ms?:1000..120000"),
+        AgentToolSpec("file.read", "读取文本文件内容", "path:string"),
+        AgentToolSpec("file.write", "写入文本内容到文件", "path:string, content:string"),
+        AgentToolSpec("file.list", "列出目录中的文件和子目录", "path:string"),
+        AgentToolSpec("file.stat", "获取文件或目录的元信息", "path:string"),
+        AgentToolSpec("file.delete", "删除文件或目录", "path:string")
     )
 
     fun systemPrompt(): String = buildString {
@@ -44,6 +49,7 @@ object AgentToolRegistry {
     fun canonicalId(id: String): String = when (id.lowercase()) {
         "search", "extract", "title", "links", "open" -> "browser.${id.lowercase()}"
         "terminal" -> "terminal.exec"
+        "read", "write", "list", "stat", "delete" -> "file.${id.lowercase()}"
         else -> id.lowercase()
     }
 
@@ -54,6 +60,11 @@ object AgentToolRegistry {
         "browser.links" -> "提取网页链接"
         "browser.open" -> "打开网页"
         "terminal.exec" -> "执行终端任务"
+        "file.read" -> "读取文件"
+        "file.write" -> "写入文件"
+        "file.list" -> "列出目录"
+        "file.stat" -> "查看文件信息"
+        "file.delete" -> "删除文件"
         else -> "执行工具"
     }
 

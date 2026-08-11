@@ -64,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.agentt.app.ui.files.FileTools
 import com.agentt.app.ui.markdown.MarkdownText
 import com.agentt.app.ui.providers.ProviderConfig
 import com.agentt.app.ui.providers.ProviderStore
@@ -79,21 +80,26 @@ import java.util.UUID
 
 const val MAX_AGENT_STEPS = 5
 
-private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓手机上。你通过“动作流”来完成任务。
-你可以调用内置网页工具获取实时信息：
-- browser.open(url)：在内置浏览器中打开网页
-- browser.extract(url)：抓取网页并返回正文纯文本
+private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓手机上。你通过"动作流"来完成任务。
+你可以调用内置工具获取实时信息：
+- browser.search(query)：搜索互联网
+- browser.extract(url)：抓取网页正文
 - browser.title(url)：获取网页标题
-- browser.links(url)：提取网页中的所有链接
-- browser.search(query)：搜索网页，返回结果列表
+- browser.links(url)：提取网页链接
+- browser.open(url)：在浏览器中打开网页
+- file.list(path)：列出目录内容
+- file.read(path)：读取文本文件
+- file.write(path, content)：写入文本文件
+- file.stat(path)：查看文件信息
+- file.delete(path)：删除文件
 
 你的输出必须是 JSON 动作流，不要输出任何其它文字，格式如下：
-{"actions":[{"type":"think","content":"你的推理"},{"type":"browser","tool":"extract","url":"https://example.com"},{"type":"reply","content":"最终回答"}]}
+{"actions":[{"type":"think","content":"你的推理"},{"type":"tool","tool":"browser.extract","url":"https://example.com"},{"type":"reply","content":"最终回答"}]}
 
 规则：
-1. type 只能是 think（推理）、browser（调用工具）、reply（最终回复）。
-2. browser 动作必须带 tool 字段；extract/title/links 带 url，search 带 query。
-3. 需要网页信息时，先用 browser 获取，工具结果会自动回传给你，你再继续推理。
+1. type 只能是 think（推理）、tool（调用工具，带 tool 字段指定工具名）、reply（最终回复）。
+2. 文件工具：file.read/write 带 path 和可选的 content；file.list/stat/delete 带 path。
+3. 工具结果会自动回传给你，你再继续推理。
 4. 如果一次动作流里没有 reply，你会收到工具结果后继续，直到给出 reply。
 5. 不需要工具时，直接输出 {"actions":[{"type":"reply","content":"回答"}]}。
 6. reply 的 content 是最终展示给用户的内容，使用与用户相同的语言。"""
@@ -143,19 +149,12 @@ private fun chatAnthropic(p: ProviderConfig, history: List<ChatMessage>): String
 }
 
 private fun chatGemini(p: ProviderConfig, history: List<ChatMessage>): String {
-    val contents = JSONArray().apply {
-        history.forEach { m ->
-            put(
-                JSONObject()
-                    .put("role", if (m.role == "assistant") "model" else "user")
-                    .put("parts", JSONArray().put(JSONObject().put("text", m.content)))
-            )
-        }
-    }
     val r = httpJson(
-        "POST", p.baseUrl.trimEnd('/') + "/models/${p.mainModel}:generateContent?key=${p.apiKey}",
-        emptyMap(),
-        JSONObject().put("contents", contents)
+        "POST", p.baseUrl.trimEnd('/') + "/v1beta/models/${p.mainModel}:generateContent",
+        mapOf("x-goog-api-key" to p.apiKey),
+        JSONObject().put("contents", JSONArray().apply {
+            history.forEach { put(JSONObject().put("role", it.role).put("parts", JSONArray().put(JSONObject().put("text", it.content)))) }
+        })
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
     return JSONObject(r.body).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
@@ -234,6 +233,8 @@ fun ChatScreen(
     suspend fun runAgent(providers: List<ProviderConfig>) {
         var candidates = providers
         val toolResults = mutableListOf<String>()
+        val fileTools = FileTools
+        val fileBaseDir = fileTools.getBaseDir(context.applicationContext)
         repeat(MAX_AGENT_STEPS) {
             val failedAttempts = mutableListOf<RecoveryAttempt>()
             val recovery = recoverChatWithProviders(
@@ -274,7 +275,7 @@ fun ChatScreen(
                         persist()
                     }
                     "browser" -> {
-                        loadingLabel = toolActionLabel(a.tool)
+                        loadingLabel = AgentToolRegistry.actionLabel(a.tool)
                         val summary = WebTools.runTool(a.tool, a.url, a.query)
                         messages.add(
                             ChatMessage(
@@ -285,6 +286,33 @@ fun ChatScreen(
                         )
                         toolResults.add("[工具 ${a.tool}(${a.url ?: a.query}) 结果]\n${summary.take(3000)}")
                         if (a.tool == "open" && a.url != null) onOpenBrowser(a.url)
+                        persist()
+                    }
+                    "file" -> {
+                        loadingLabel = AgentToolRegistry.actionLabel(a.tool)
+                        val toolId = AgentToolRegistry.canonicalId(a.tool)
+                        val path = a.url ?: a.query ?: ""
+                        val summary = withContext(Dispatchers.IO) {
+                            when (toolId) {
+                                "file.list" -> fileTools.list(fileBaseDir, path)
+                                "file.read" -> fileTools.read(fileBaseDir, path)
+                                "file.write" -> {
+                                    val content = a.content.ifBlank { a.requirement }
+                                    fileTools.write(fileBaseDir, path, content)
+                                }
+                                "file.stat" -> fileTools.stat(fileBaseDir, path)
+                                "file.delete" -> fileTools.delete(fileBaseDir, path)
+                                else -> "未知文件工具: ${a.tool}"
+                            }
+                        }
+                        messages.add(
+                            ChatMessage(
+                                UUID.randomUUID().toString(), "assistant",
+                                "${a.tool}($path)\n${summary.take(1500)}",
+                                recovery.model, "tool"
+                            )
+                        )
+                        toolResults.add("[工具 ${a.tool}($path) 结果]\n${summary.take(3000)}")
                         persist()
                     }
                     "reply" -> {
@@ -418,14 +446,15 @@ fun ChatScreen(
 private fun UserBubble(content: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Surface(
-            shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
-            color = MaterialTheme.colorScheme.primaryContainer
+            shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.widthIn(max = 320.dp)
         ) {
             Text(
                 content,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
         }
     }
@@ -435,63 +464,46 @@ private fun UserBubble(content: String) {
 private fun AgentCard(
     content: String,
     model: String?,
-    streaming: Boolean = false,
-    onTick: () -> Unit = {},
+    streaming: Boolean,
+    onTick: () -> Unit
 ) {
-    var visible by remember(content, streaming) {
-        mutableStateOf(if (streaming) 0 else content.length)
-    }
-    LaunchedEffect(content, streaming) {
-        if (!streaming) {
-            visible = content.length
-            return@LaunchedEffect
-        }
-        while (visible < content.length) {
-            visible = nextBoundary(content, visible)
-            onTick()
-            delay(24)
-        }
-    }
-    val cursorAlpha by rememberInfiniteTransition(label = "cursor").animateFloat(
-        initialValue = 0.15f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
-        label = "cursorAlpha"
-    )
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-    ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.size(30.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
-                }
-                Spacer(Modifier.width(8.dp))
-                Column {
-                    Text("AgentT", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    model?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                    }
-                }
+    var displayed by remember { mutableStateOf(if (streaming) "" else content) }
+
+    LaunchedEffect(streaming, content) {
+        if (streaming) {
+            displayed = ""
+            var pos = 0
+            while (pos < content.length) {
+                val next = nextBoundary(content, pos)
+                displayed = content.substring(0, next)
+                pos = next
+                onTick()
+                delay(48L)
             }
-            Spacer(Modifier.height(8.dp))
-            MarkdownText(
-                content.take(visible),
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            if (streaming && visible < content.length) {
-                Text(
-                    "▍",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = cursorAlpha)
+        } else {
+            displayed = content
+        }
+    }
+
+    Row(Modifier.fillMaxWidth()) {
+        Surface(
+            shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.widthIn(max = 360.dp)
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                MarkdownText(
+                    markdown = displayed,
+                    style = MaterialTheme.typography.bodyMedium
                 )
+                if (model != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        model,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
             }
         }
     }
@@ -499,78 +511,82 @@ private fun AgentCard(
 
 @Composable
 private fun ThinkCard(content: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-    ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Bolt, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(6.dp))
-                Text("分析问题", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+    Row(Modifier.fillMaxWidth()) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+            modifier = Modifier.widthIn(max = 340.dp)
+        ) {
+            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+                Icon(
+                    Icons.Outlined.Bolt,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).padding(top = 2.dp),
+                    tint = MaterialTheme.colorScheme.secondary
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
             }
-            Spacer(Modifier.height(6.dp))
-            Text(content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
 private fun ToolCard(content: String) {
-    val call = content.substringBefore('\n')
-    val tool = call.substringBefore('(')
-    val target = call.substringAfter('(', "").substringBeforeLast(')', "")
-    val result = content.substringAfter('\n', "")
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
-    ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(6.dp))
-                Text(toolActionLabel(tool), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-            }
-            if (target.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
-                Text(target, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-            }
-            if (result.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(result, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(Modifier.fillMaxWidth()) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            modifier = Modifier.widthIn(max = 340.dp)
+        ) {
+            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+                Icon(
+                    Icons.Outlined.Terminal,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).padding(top = 2.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
 }
 
-private fun toolActionLabel(tool: String): String = when (tool.lowercase()) {
-    "search" -> "搜索网页"
-    "extract" -> "读取网页正文"
-    "title" -> "获取网页标题"
-    "links" -> "提取网页链接"
-    "open" -> "打开网页"
-    else -> "执行网页操作"
-}
-
 @Composable
 private fun AgentThinking(label: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-    ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.size(30.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
+    val infinite = rememberInfiniteTransition(label = "thinking")
+    val alpha by infinite.animateFloat(
+        initialValue = 0.35f, targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "pulse"
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+                )
             }
-            Spacer(Modifier.width(10.dp))
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
