@@ -23,6 +23,28 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Normalize source anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('app/src/main/java/com/agentt/app/ui/chat/ChatScreen.kt')
+          text = p.read_text(encoding='utf-8')
+          pattern = r'''                    "browser" -> \{\n[\s\S]*?                        persist\(\)\n                    \}\n                    "reply" -> \{'''
+          replacement = '''                    "browser" -> {
+                        loadingLabel = toolActionLabel(a.tool)
+                        val summary = WebTools.runTool(a.tool, a.url, a.query)
+                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "${a.tool}(${a.url ?: a.query})\\n${summary.take(1500)}", recovery.model, "tool"))
+                        toolResults.add("[工具 ${a.tool}(${a.url ?: a.query}) 结果]\\n${summary.take(3000)}")
+                        if (a.tool == "open" && a.url != null) onOpenBrowser(a.url)
+                        persist()
+                    }
+                    "reply" -> {'''
+          text, count = re.subn(pattern, lambda _: replacement, text, count=1)
+          if count != 1:
+              raise RuntimeError('unable to normalize ChatScreen tool branch')
+          p.write_text(text, encoding='utf-8')
+          PY
       - name: Apply autonomous agent runtime upgrade
         run: python3 .github/scripts/agent_core_upgrade.py
       - name: Unit tests and debug compile
