@@ -23,31 +23,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Normalize source and patch-script escaping
+      - name: Make tool-branch patch structural
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          source = Path('app/src/main/java/com/agentt/app/ui/chat/ChatScreen.kt')
-          text = source.read_text(encoding='utf-8')
-          pattern = r'''                    "browser" -> \{\n[\s\S]*?                        persist\(\)\n                    \}\n                    "reply" -> \{'''
-          replacement = '''                    "browser" -> {
-                        loadingLabel = toolActionLabel(a.tool)
-                        val summary = WebTools.runTool(a.tool, a.url, a.query)
-                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", "${a.tool}(${a.url ?: a.query})\\n${summary.take(1500)}", recovery.model, "tool"))
-                        toolResults.add("[工具 ${a.tool}(${a.url ?: a.query}) 结果]\\n${summary.take(3000)}")
-                        if (a.tool == "open" && a.url != null) onOpenBrowser(a.url)
-                        persist()
-                    }
-                    "reply" -> {'''
-          text, count = re.subn(pattern, lambda _: replacement, text, count=1)
-          if count != 1:
-              raise RuntimeError('unable to normalize ChatScreen tool branch')
-          source.write_text(text, encoding='utf-8')
-          script = Path('.github/scripts/agent_core_upgrade.py')
-          script_text = script.read_text(encoding='utf-8')
-          script_text = script_text.replace(r'\"', '"').replace(r'\\\\n', r'\\n')
-          script.write_text(script_text, encoding='utf-8')
+          p = Path('.github/scripts/agent_core_upgrade.py')
+          text = p.read_text(encoding='utf-8')
+          old = "if old not in text: raise RuntimeError('tool branch patch failed')\ntext = text.replace(old, new, 1)"
+          new = '''branch_start = text.find('                    "browser" -> {')
+          branch_end = text.find('                    "reply" -> {', branch_start)
+          if branch_start < 0 or branch_end < 0: raise RuntimeError('tool branch boundaries missing')
+          text = text[:branch_start] + new + "\\n" + text[branch_end:]'''
+          if old not in text:
+              raise RuntimeError('patch-script tool replacement block missing')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
       - name: Apply autonomous agent runtime upgrade
         run: python3 .github/scripts/agent_core_upgrade.py
