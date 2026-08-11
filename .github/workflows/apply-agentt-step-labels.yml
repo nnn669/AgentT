@@ -14,7 +14,6 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
-
           path = Path('app/src/main/java/com/agentt/app/ui/chat/ChatScreen.kt')
           text = path.read_text()
           replacements = {
@@ -37,52 +36,18 @@ jobs:
               if old not in text:
                   raise SystemExit(f'Missing expected source: {old[:80]!r}')
               text = text.replace(old, new, 1)
-
-          old_tool = '''@Composable
-private fun ToolCard(content: String) {
-    Surface('''
-          new_tool = '''@Composable
-private fun ToolCard(content: String) {
-    val call = content.substringBefore('\\n')
-    val tool = call.substringBefore('(')
-    val target = call.substringAfter('(', "").substringBeforeLast(')', "")
-    val result = content.substringAfter('\\n', "")
-    Surface('''
+          old_tool = "@Composable\nprivate fun ToolCard(content: String) {\n    Surface("
+          new_tool = "@Composable\nprivate fun ToolCard(content: String) {\n    val call = content.substringBefore('\\n')\n    val tool = call.substringBefore('(')\n    val target = call.substringAfter('(', \"\").substringBeforeLast(')', \"\")\n    val result = content.substringAfter('\\n', \"\")\n    Surface("
           if old_tool not in text:
               raise SystemExit('Missing ToolCard declaration')
           text = text.replace(old_tool, new_tool, 1)
-
-          old_body = '''Text("网页工具", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)'''
-          new_body = '''Text(toolActionLabel(tool), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-            }
-            if (target.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
-                Text(target, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-            }
-            if (result.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(result, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }'''
+          old_body = 'Text("网页工具", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)\n            }\n            Spacer(Modifier.height(6.dp))\n            Text(content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)'
+          new_body = 'Text(toolActionLabel(tool), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)\n            }\n            if (target.isNotBlank()) {\n                Spacer(Modifier.height(4.dp))\n                Text(target, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)\n            }\n            if (result.isNotBlank()) {\n                Spacer(Modifier.height(6.dp))\n                Text(result, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)\n            }'
           if old_body not in text:
               raise SystemExit('Missing ToolCard body')
           text = text.replace(old_body, new_body, 1)
-
-          marker = '''@Composable
-private fun AgentThinking(label: String) {'''
-          helper = '''private fun toolActionLabel(tool: String): String = when (tool.lowercase()) {
-    "search" -> "搜索网页"
-    "extract" -> "读取网页正文"
-    "title" -> "获取网页标题"
-    "links" -> "提取网页链接"
-    "open" -> "打开网页"
-    else -> "执行网页操作"
-}
-
-@Composable
-private fun AgentThinking(label: String) {'''
+          marker = '@Composable\nprivate fun AgentThinking(label: String) {'
+          helper = 'private fun toolActionLabel(tool: String): String = when (tool.lowercase()) {\n    "search" -> "搜索网页"\n    "extract" -> "读取网页正文"\n    "title" -> "获取网页标题"\n    "links" -> "提取网页链接"\n    "open" -> "打开网页"\n    else -> "执行网页操作"\n}\n\n@Composable\nprivate fun AgentThinking(label: String) {'
           if marker not in text:
               raise SystemExit('Missing AgentThinking marker')
           text = text.replace(marker, helper, 1)
