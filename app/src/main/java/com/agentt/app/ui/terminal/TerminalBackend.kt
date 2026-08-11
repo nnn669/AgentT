@@ -1,6 +1,7 @@
 package com.agentt.app.ui.terminal
 
 import android.content.Context
+import com.agentt.app.ui.settings.SandboxEnvironmentStore
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -60,7 +61,8 @@ class LocalTerminalBackend(context: Context) : TerminalBackend {
     override val displayName = "本地终端"
     override val available = true
 
-    private val workspace = File(context.filesDir, "terminal").apply { mkdirs() }.canonicalFile
+    private val applicationContext = context.applicationContext
+    private val workspace = File(applicationContext.filesDir, "terminal").apply { mkdirs() }.canonicalFile
     private val running = ConcurrentHashMap<String, Process>()
 
     override suspend fun execute(request: TerminalRequest): TerminalResult = withContext(Dispatchers.IO) {
@@ -71,6 +73,7 @@ class LocalTerminalBackend(context: Context) : TerminalBackend {
                 environment()["HOME"] = workspace.path
                 environment()["TMPDIR"] = File(workspace, "tmp").apply { mkdirs() }.path
                 environment()["PATH"] = "/system/bin:/system/xbin:/vendor/bin"
+                environment().putAll(SandboxEnvironmentStore.from(applicationContext).environment())
                 redirectErrorStream(false)
             }
             .start()
@@ -80,12 +83,8 @@ class LocalTerminalBackend(context: Context) : TerminalBackend {
         val truncated = AtomicBoolean(false)
         var stdout = ""
         var stderr = ""
-        val outThread = Thread {
-            stdout = process.inputStream.readLimited(budget, truncated)
-        }
-        val errThread = Thread {
-            stderr = process.errorStream.readLimited(budget, truncated)
-        }
+        val outThread = Thread { stdout = process.inputStream.readLimited(budget, truncated) }
+        val errThread = Thread { stderr = process.errorStream.readLimited(budget, truncated) }
         outThread.isDaemon = true
         errThread.isDaemon = true
         outThread.start()
