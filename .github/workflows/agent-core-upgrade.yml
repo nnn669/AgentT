@@ -23,13 +23,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Normalize source anchor
+      - name: Normalize source and patch-script escaping
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
-          p = Path('app/src/main/java/com/agentt/app/ui/chat/ChatScreen.kt')
-          text = p.read_text(encoding='utf-8')
+          source = Path('app/src/main/java/com/agentt/app/ui/chat/ChatScreen.kt')
+          text = source.read_text(encoding='utf-8')
           pattern = r'''                    "browser" -> \{\n[\s\S]*?                        persist\(\)\n                    \}\n                    "reply" -> \{'''
           replacement = '''                    "browser" -> {
                         loadingLabel = toolActionLabel(a.tool)
@@ -43,7 +43,11 @@ jobs:
           text, count = re.subn(pattern, lambda _: replacement, text, count=1)
           if count != 1:
               raise RuntimeError('unable to normalize ChatScreen tool branch')
-          p.write_text(text, encoding='utf-8')
+          source.write_text(text, encoding='utf-8')
+          script = Path('.github/scripts/agent_core_upgrade.py')
+          script_text = script.read_text(encoding='utf-8')
+          script_text = script_text.replace(r'\"', '"').replace(r'\\\\n', r'\\n')
+          script.write_text(script_text, encoding='utf-8')
           PY
       - name: Apply autonomous agent runtime upgrade
         run: python3 .github/scripts/agent_core_upgrade.py
