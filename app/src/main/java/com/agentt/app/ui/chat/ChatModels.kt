@@ -54,15 +54,17 @@ fun parseActionStream(content: String): List<AgentAction>? {
                 val rawType = o.optString("type").lowercase()
                 if (rawType.isBlank()) continue
                 val isTerminal = rawType == "terminal"
-                val isBrowser = rawType == "browser"
-                val tool = when {
-                    isTerminal -> "terminal.exec"
-                    isBrowser -> AgentToolRegistry.canonicalId(o.optString("tool"))
-                    else -> o.optString("tool")
-                }
+                val isBrowser = rawType == "browser" || rawType == "tool"
                 add(AgentAction(
-                    type = if (isTerminal || isBrowser) "tool" else rawType,
-                    tool = tool,
+                    type = when {
+                        isTerminal || isBrowser -> "browser"
+                        else -> rawType
+                    },
+                    tool = when {
+                        isTerminal -> "terminal"
+                        isBrowser -> o.optString("tool").let { if (it.contains('.')) it.substringAfterLast('.') else it }
+                        else -> o.optString("tool")
+                    },
                     url = o.optString("url").ifBlank { null },
                     query = when {
                         isTerminal -> o.toString()
