@@ -25,6 +25,10 @@ data class AgentAction(
     val query: String? = null,
     val content: String = "",
     val command: String? = null,
+    val requirement: String = "",
+    val key: String = "",
+    val title: String = "",
+    val reason: String = "",
     val backend: String = "LOCAL",
     val timeoutMs: Long = 30_000,
     val maxOutputChars: Int = 256_000
@@ -44,28 +48,38 @@ fun parseActionStream(content: String): List<AgentAction>? {
     val json = extractJson(content) ?: return null
     return try {
         val arr = JSONObject(json).optJSONArray("actions") ?: return null
-        val list = buildList {
+        buildList {
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                val rawType = o.optString("type")
+                val rawType = o.optString("type").lowercase()
                 if (rawType.isBlank()) continue
-                // Keep ChatScreen's existing tool branch as the single execution path.
-                // The original action type remains visible in the model protocol tests.
-                val isTerminal = rawType.equals("terminal", ignoreCase = true)
+                val isTerminal = rawType == "terminal"
+                val isBrowser = rawType == "browser"
+                val tool = when {
+                    isTerminal -> "terminal.exec"
+                    isBrowser -> AgentToolRegistry.canonicalId(o.optString("tool"))
+                    else -> o.optString("tool")
+                }
                 add(AgentAction(
-                    type = if (isTerminal) "browser" else rawType,
-                    tool = if (isTerminal) "terminal" else o.optString("tool"),
+                    type = if (isTerminal || isBrowser) "tool" else rawType,
+                    tool = tool,
                     url = o.optString("url").ifBlank { null },
-                    query = if (isTerminal) o.toString() else o.optString("query").ifBlank { null },
+                    query = when {
+                        isTerminal -> o.toString()
+                        else -> o.optString("query").ifBlank { null }
+                    },
                     content = o.optString("content"),
                     command = o.optString("command").ifBlank { null },
+                    requirement = o.optString("requirement", o.optString("kind")),
+                    key = o.optString("key"),
+                    title = o.optString("title"),
+                    reason = o.optString("reason"),
                     backend = o.optString("backend", "LOCAL").uppercase(),
                     timeoutMs = o.optLong("timeout_ms", 30_000).coerceIn(1_000, 120_000),
                     maxOutputChars = o.optInt("max_output_chars", 256_000).coerceIn(1_024, 512_000)
                 ))
             }
-        }
-        list.takeIf { it.isNotEmpty() }
+        }.takeIf { it.isNotEmpty() }
     } catch (_: Exception) { null }
 }
 
