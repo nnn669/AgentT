@@ -1,7 +1,6 @@
 name: Apply AgentT step labels
 
-on:
-  workflow_dispatch:
+'on': [push, workflow_dispatch]
 
 permissions:
   contents: write
@@ -18,7 +17,6 @@ jobs:
 
           path = Path('app/src/main/java/com/agentt/app/ui/chat/ChatScreen.kt')
           text = path.read_text()
-
           replacements = {
               'var loading by remember { mutableStateOf(false) }': 'var loading by remember { mutableStateOf(false) }\n    var loadingLabel by remember { mutableStateOf("分析问题") }',
               'loading = false\n    }\n\n    // Auto-follow': 'loading = false\n        loadingLabel = "分析问题"\n    }\n\n    // Auto-follow',
@@ -88,7 +86,6 @@ private fun AgentThinking(label: String) {'''
           if marker not in text:
               raise SystemExit('Missing AgentThinking marker')
           text = text.replace(marker, helper, 1)
-
           path.write_text(text)
           Path('.github/workflows/apply-agentt-step-labels.yml').unlink()
           PY
