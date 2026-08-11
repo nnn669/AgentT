@@ -1,8 +1,6 @@
 package com.agentt.app.ui.web
 
 import android.content.Context
-import com.agentt.app.ui.chat.AgentPackageRecovery
-import com.agentt.app.ui.chat.AgentToolRegistry
 import com.agentt.app.ui.settings.SandboxEnvironmentStore
 import com.agentt.app.ui.terminal.LocalTerminalBackend
 import com.agentt.app.ui.terminal.TerminalAgentTool
@@ -31,13 +29,16 @@ object WebTools {
         }
     }
 
-    suspend fun runTool(tool: String, url: String?, query: String?): String = when (AgentToolRegistry.canonicalId(tool)) {
-        "browser.extract" -> extract(url.orEmpty())
-        "browser.title" -> title(url.orEmpty())
-        "browser.links" -> links(url.orEmpty())
-        "browser.search" -> search(query ?: url.orEmpty())
-        "browser.open" -> "将在内置浏览器中打开：${url ?: "无地址"}"
-        "terminal.exec" -> runTerminal(query.orEmpty())
+    suspend fun runTool(tool: String, url: String?, query: String?): String = when {
+        tool.startsWith("browser.") -> when (tool.removePrefix("browser.")) {
+            "extract" -> extract(url.orEmpty())
+            "title" -> title(url.orEmpty())
+            "links" -> links(url.orEmpty())
+            "search" -> search(query ?: url.orEmpty())
+            "open" -> "将在内置浏览器中打开：${url ?: "无地址"}"
+            else -> "未知工具：$tool"
+        }
+        tool.startsWith("terminal.") || tool == "terminal.exec" -> runTerminal(query.orEmpty())
         else -> "未知工具：$tool"
     }
 
@@ -52,30 +53,19 @@ object WebTools {
             maxOutputChars = parsed?.optInt("max_output_chars", 256_000)?.coerceIn(1_024, 512_000) ?: 256_000,
             backend = runCatching { TerminalBackendId.valueOf(parsed?.optString("backend", "LOCAL")?.uppercase() ?: "LOCAL") }.getOrDefault(TerminalBackendId.LOCAL)
         )
-        fun execute(value: TerminalToolCall): String {
-            val output = StringBuilder()
-            kotlinx.coroutines.runBlocking {
-                tool.execute(value, confirmed = true).collect { event ->
-                    when (event.kind) {
-                        TerminalEventKind.OUTPUT -> output.append(if (event.stdout) event.text else "[stderr] ${event.text}")
-                        TerminalEventKind.COMPLETED -> event.result?.let { output.append("\n[exit=${it.exitCode}${if (it.timedOut) ", timeout" else ""}${if (it.truncated) ", truncated" else ""}]") }
-                        TerminalEventKind.FAILED -> output.append("\n[failed] ${event.text}")
-                        else -> Unit
-                    }
+        val output = StringBuilder()
+        kotlinx.coroutines.runBlocking {
+            tool.execute(call, confirmed = true).collect { event ->
+                when (event.kind) {
+                    TerminalEventKind.OUTPUT -> output.append(if (event.stdout) event.text else "[stderr] ${event.text}")
+                    TerminalEventKind.COMPLETED -> event.result?.let { output.append("\n[exit=${it.exitCode}${if (it.timedOut) ", timeout" else ""}${if (it.truncated) ", truncated" else ""}]") }
+                    TerminalEventKind.FAILED -> output.append("\n[failed] ${event.text}")
+                    else -> Unit
                 }
             }
-            return output.toString().trim().ifBlank { "命令执行完成，无输出" }
         }
-        val first = execute(call)
-        val missing = AgentPackageRecovery.missingCommand(first)
-        if (missing == null) return@withContext redact(first)
-        val managerOutput = execute(call.copy(command = "command -v apk || command -v pkg || command -v apt-get || true"))
-        val manager = managerOutput.lineSequence().map(String::trim).firstOrNull { it.endsWith("/apk") || it.endsWith("/pkg") || it.endsWith("/apt-get") }?.substringAfterLast('/')
-        val install = manager?.let { AgentPackageRecovery.installCommand(it, missing) }
-        if (install == null) return@withContext redact(first) + "\n" + AgentToolRegistry.requirementMarker(AgentPackageRecovery.runtimeRequirement(missing))
-        val installed = execute(call.copy(command = install))
-        if (installed.contains("[exit=") && !installed.contains("[exit=0")) return@withContext redact(first + "\n[自动安装 $missing 失败]\n$installed") + "\n" + AgentToolRegistry.requirementMarker(AgentPackageRecovery.runtimeRequirement(missing))
-        redact("[已自动安装 $missing 并重试]\n${execute(call)}")
+        val result = output.toString().trim().ifBlank { "命令执行完成，无输出" }
+        redact(result)
     }
 
     private fun redact(value: String): String = sandboxEnvironment?.redactForModel(value) ?: value
