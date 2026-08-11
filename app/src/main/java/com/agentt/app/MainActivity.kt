@@ -24,11 +24,12 @@ import com.agentt.app.ui.chat.ChatStore
 import com.agentt.app.ui.chat.createChatSession
 import com.agentt.app.ui.providers.ProvidersScreen
 import com.agentt.app.ui.settings.SettingsDrawer
+import com.agentt.app.ui.terminal.TerminalScreen
 import com.agentt.app.ui.theme.AgentTTheme
 import com.agentt.app.ui.workspace.WorkspaceScreen
 import kotlinx.coroutines.launch
 
-enum class Screen { Workspace, Chat, Providers, Browser }
+enum class Screen { Workspace, Chat, Providers, Browser, Terminal }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,7 +73,7 @@ class MainActivity : ComponentActivity() {
                                 chatSessionId = s.id
                                 chatTitle = s.title
                             },
-                            onOpenTerminal = { android.widget.Toast.makeText(this@MainActivity, "终端暂未开放", android.widget.Toast.LENGTH_SHORT).show() },
+                            onOpenTerminal = { screen = Screen.Terminal },
                             onOpenBrowser = { url ->
                                 browserUrl = url ?: ""
                                 screen = Screen.Browser
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
                             initialUrl = browserUrl,
                             onBack = { screen = Screen.Chat }
                         )
+                        Screen.Terminal -> TerminalScreen(onBack = { screen = Screen.Chat })
                     }
                 }
             }
