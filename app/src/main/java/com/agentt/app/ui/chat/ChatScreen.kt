@@ -65,8 +65,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.agentt.app.ui.assistant.TagStore
 import com.agentt.app.ui.files.FileTools
 import com.agentt.app.ui.markdown.MarkdownText
+import com.agentt.app.ui.memory.MemoryStore
 import com.agentt.app.ui.providers.ProviderConfig
 import com.agentt.app.ui.providers.ProviderStore
 import com.agentt.app.ui.providers.httpJson
@@ -551,10 +553,20 @@ fun ChatScreen(
         loadingLabel = "分析问题"
         scope.launch {
             val assistant = assistantStore.currentAssistant()
-            val systemPrompt = if (assistant?.systemPrompt?.isNotBlank() == true) {
+            val tagStore = TagStore.from(context)
+            val memoryStore = MemoryStore.from(context)
+            val tagId = assistant?.id?.let { tagStore.tagOfAssistant(it) }
+            val memoryContext = memoryStore.buildMemoryContext(
+                assistantId = assistant?.id ?: "",
+                assistantTagId = tagId
+            )
+            var systemPrompt = if (assistant?.systemPrompt?.isNotBlank() == true) {
                 assistant.systemPrompt
             } else {
                 SYSTEM_PROMPT
+            }
+            if (memoryContext.isNotEmpty()) {
+                systemPrompt += memoryContext
             }
             val allProviders = providerStore.load()
             val providers = if (assistant?.providerId?.isNotBlank() == true) {
@@ -705,96 +717,53 @@ private fun MessageBubble(
                 }
             }
             kind == "think" -> {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
+                Row(
+                    modifier = Modifier.padding(8.dp, 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Outlined.Bolt,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.tertiary
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "推理",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.tertiary
-                            )
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            msg.content.take(200),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
+                    val infiniteTransition = rememberInfiniteTransition(label = "thinking")
+                    val alpha by infiniteTransition.animateFloat(
+                        initialValue = 0.3f, targetValue = 1f,
+                        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
+                        label = "alpha"
+                    )
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = alpha)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        msg.content,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
                 }
             }
             kind == "tool" -> {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    modifier = Modifier.widthIn(max = 360.dp)
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Outlined.Bolt,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "工具结果",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                        Spacer(Modifier.height(4.dp))
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Bolt,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            msg.content.take(200),
+                            msg.content.take(160),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            maxLines = 2
                         )
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TypingIndicator(
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "typing")
-    val alpha = infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        repeat(3) {
-            Box(
-                Modifier.size(6.dp).clip(CircleShape).background(
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = alpha.value)
-                )
-            )
         }
     }
 }
