@@ -8,13 +8,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.GZIPInputStream
-import java.util.zip.TarInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.json.JSONObject
 
-/**
- * Installs an externally hosted Alpine rootfs and proot binary only after
- * SHA-256 verification. The APK stays small and runtime updates are possible.
- */
 data class AlpineManifest(
     val rootfsUrl: String,
     val rootfsSha256: String,
@@ -55,11 +51,11 @@ class AlpineRuntime(context: Context) {
         unpackTarGz(rootfsArchive, staging)
         val verifiedProot = File(root, "proot.verified")
         prootFile.copyTo(verifiedProot, overwrite = true)
-        verifiedProot.setExecutable(true, false)
+        check(verifiedProot.setExecutable(true, false)) { "proot 无法设置为可执行" }
         rootfs.deleteRecursively()
-        staging.renameTo(rootfs)
+        check(staging.renameTo(rootfs)) { "rootfs 安装失败" }
         proot.delete()
-        verifiedProot.renameTo(proot)
+        check(verifiedProot.renameTo(proot)) { "proot 安装失败" }
         marker.writeText(manifest.version)
         rootfsArchive.delete()
         prootFile.delete()
@@ -77,23 +73,27 @@ class AlpineRuntime(context: Context) {
 
     private fun download(url: String, target: File, onProgress: (Long, Long) -> Unit) {
         val connection = URL(url).openConnection() as HttpURLConnection
-        connection.connectTimeout = 20_000
-        connection.readTimeout = 60_000
-        connection.inputStream.use { input ->
-            val total = connection.contentLengthLong
-            FileOutputStream(target).use { output ->
-                val buffer = ByteArray(32 * 1024)
-                var done = 0L
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    output.write(buffer, 0, count)
-                    done += count
-                    onProgress(done, total)
+        try {
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 60_000
+            check(connection.responseCode in 200..299) { "下载失败 HTTP ${connection.responseCode}" }
+            connection.inputStream.use { input ->
+                val total = connection.contentLengthLong
+                FileOutputStream(target).use { output ->
+                    val buffer = ByteArray(32 * 1024)
+                    var done = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        done += count
+                        onProgress(done, total)
+                    }
                 }
             }
+        } finally {
+            connection.disconnect()
         }
-        connection.disconnect()
     }
 
     private fun verify(file: File, expected: String) {
@@ -112,27 +112,19 @@ class AlpineRuntime(context: Context) {
 
     private fun unpackTarGz(archive: File, destination: File) {
         GZIPInputStream(FileInputStream(archive)).use { gzip ->
-            TarInputStream(gzip).use { tar ->
+            TarArchiveInputStream(gzip).use { tar ->
                 while (true) {
-                    val entry = tar.nextEntry ?: break
+                    val entry = tar.nextTarEntry ?: break
                     val target = File(destination, entry.name).canonicalFile
                     check(target.path.startsWith(destination.canonicalPath + File.separator)) { "rootfs 条目路径非法" }
                     if (entry.isDirectory) target.mkdirs()
                     else {
                         target.parentFile?.mkdirs()
                         FileOutputStream(target).use { out -> tar.copyTo(out) }
-                        target.setExecutable(entry.mode and 0b001 != 0, false)
+                        target.setExecutable((entry.mode and 0b001) != 0, false)
                     }
                 }
             }
         }
     }
-}
-
-private class TarInputStream(input: java.io.InputStream) : java.io.FilterInputStream(input) {
-    data class Entry(val name: String, val isDirectory: Boolean, val mode: Int)
-    var nextEntry: Entry? = null
-        private set
-    override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len)
-    fun nextEntry(): Entry? = null
 }
