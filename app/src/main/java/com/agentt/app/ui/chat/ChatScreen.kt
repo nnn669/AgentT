@@ -93,9 +93,12 @@ private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓�
 - browser.open(url)：在浏览器中打开网页
 - file.list(path)：列出目录内容
 - file.read(path)：读取文本文件
-- file.write(path, content)：写入文本文件
+- file.write(path, content)：写入文本文件（覆盖写入）
+- file.append(path, content)：追加内容到文件
+- file.copy(source, target)：复制文件（path=源, target=目标）
+- file.move(source, target)：移动/重命名文件（path=源, target=目标）
 - file.stat(path)：查看文件信息
-- file.delete(path)：删除文件
+- file.delete(path)：删除文件或目录
 - terminal.execute(command)：在本地 Shell 中执行命令（无 root 权限，仅限可访问的目录）
 
 你的输出必须是 JSON 动作流，不要输出任何其它文字，格式如下：
@@ -103,7 +106,7 @@ private const val SYSTEM_PROMPT = """你是 AgentT 智能体，运行在安卓�
 
 规则：
 1. type 只能是 think（推理）、tool（调用工具，带 tool 字段指定工具名）、reply（最终回复）。
-2. 文件工具：file.read/write 带 path 和可选的 content；file.list/stat/delete 带 path。
+2. 文件工具：file.read/write/append 带 path 和 content；file.copy/move 带 path（源）和 target（目标）；file.list/stat/delete 带 path。
 3. 终端工具：terminal.execute 带 command（要执行的命令）或 payload 字段。
 4. 工具结果会自动回传给你，你再继续推理。
 5. 如果一次动作流里没有 reply，你会收到工具结果后继续，直到给出 reply。
@@ -335,7 +338,8 @@ private fun parseActionStream(text: String): List<Action>? {
                 query = a.optString("query").ifBlank { null },
                 content = a.optString("content").ifBlank { null },
                 path = a.optString("path").ifBlank { null },
-                payload = a.optString("payload").ifBlank { null }
+                payload = a.optString("payload").ifBlank { null },
+                target = a.optString("target").ifBlank { null }
             ))
         }
     }
@@ -348,7 +352,8 @@ data class Action(
     val query: String? = null,
     val content: String? = null,
     val path: String? = null,
-    val payload: String? = null
+    val payload: String? = null,
+    val target: String? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -496,6 +501,23 @@ fun ChatScreen(
                                         val content = a.content ?: ""
                                         if (path.isBlank()) "文件路径为空" else fileTools.write(fileBaseDir, path, content)
                                     }
+                                    "append" -> {
+                                        val path = a.path ?: ""
+                                        val content = a.content ?: ""
+                                        if (path.isBlank()) "文件路径为空" else fileTools.append(fileBaseDir, path, content)
+                                    }
+                                    "copy" -> {
+                                        val src = a.path ?: ""
+                                        val dst = a.target ?: a.content ?: ""
+                                        if (src.isBlank() || dst.isBlank()) "源路径或目标路径为空"
+                                        else fileTools.copy(fileBaseDir, src, dst)
+                                    }
+                                    "move" -> {
+                                        val src = a.path ?: ""
+                                        val dst = a.target ?: a.content ?: ""
+                                        if (src.isBlank() || dst.isBlank()) "源路径或目标路径为空"
+                                        else fileTools.move(fileBaseDir, src, dst)
+                                    }
                                     "stat" -> {
                                         val path = a.path ?: a.url ?: ""
                                         if (path.isBlank()) "文件路径为空" else fileTools.stat(fileBaseDir, path)
@@ -593,174 +615,201 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        if (loading) {
+                            Text(
+                                loadingLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Outlined.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
+                    IconButton(onClick = onNewChat) {
+                        Icon(Icons.Outlined.AddComment, contentDescription = "新对话")
+                    }
                     Box {
-                        IconButton(onClick = { menuExpanded = !menuExpanded }) {
-                            Icon(Icons.Outlined.AutoAwesome, contentDescription = "更多", tint = MaterialTheme.colorScheme.onSurface)
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Outlined.AutoAwesome, contentDescription = "工具菜单")
                         }
-                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
                             DropdownMenuItem(
-                                text = { Text("新建对话") },
-                                onClick = { menuExpanded = false; onNewChat() },
-                                leadingIcon = { Icon(Icons.Outlined.AddComment, contentDescription = null) }
+                                text = { Text("打开浏览器") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenBrowser(null)
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Public, null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("打开终端") },
-                                onClick = { menuExpanded = false; onOpenTerminal() },
-                                leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null) }
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenTerminal()
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Terminal, null) }
                             )
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
-        }
-    ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding).navigationBarsPadding()) {
-            if (messages.isEmpty()) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Outlined.AutoAwesome,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            "开始与 AgentT 对话",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "AgentT 可以调用工具来帮你完成各种任务",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(innerPadding),
-                    state = listState,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(messages, key = { it.id }) { msg ->
-                        MessageBubble(
-                            msg = msg,
-                            isStreaming = msg.id == streamingId && streamTick < msg.content.length,
-                            streamTick = if (msg.id == streamingId) streamTick else msg.content.length
-                        )
-                    }
-                }
+        },
+        bottomBar = {
+            Surface(
+                modifier = Modifier.navigationBarsPadding(),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                ChatInputBar(
+                    value = input,
+                    onValueChange = { input = it },
+                    onSend = { send() },
+                    enabled = !loading,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun MessageBubble(
-    msg: ChatMessage,
-    isStreaming: Boolean,
-    streamTick: Int
-) {
-    val isUser = msg.role == "user"
-    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
-    ) {
-        val kind = msg.kind.ifBlank { "text" }
-        when {
-            kind == "text" || kind == "reply" -> {
-                Surface(
-                    shape = RoundedCornerShape(
-                        topStart = 16.dp, topEnd = 16.dp,
-                        bottomStart = if (isUser) 16.dp else 4.dp,
-                        bottomEnd = if (isUser) 4.dp else 16.dp
-                    ),
-                    color = bubbleColor
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        if (isStreaming) {
-                            Text(
-                                msg.content.take(streamTick),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        } else {
-                            MarkdownText(
-                                markdown = msg.content,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                        if (msg.model != null) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                msg.model,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-                }
-            }
-            kind == "think" -> {
-                Row(
-                    modifier = Modifier.padding(8.dp, 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "thinking")
-                    val alpha by infiniteTransition.animateFloat(
-                        initialValue = 0.3f, targetValue = 1f,
-                        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
-                        label = "alpha"
-                    )
+    ) { padding ->
+        if (messages.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         Icons.Outlined.AutoAwesome,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = alpha)
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.height(16.dp))
                     Text(
-                        msg.content,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        "开始与 AgentT 对话",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "AgentT 可以浏览网页、操作文件、执行命令",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        textAlign = TextAlign.Center
                     )
                 }
             }
-            kind == "tool" -> {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    modifier = Modifier.widthIn(max = 360.dp)
-                ) {
-                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.Bolt,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            msg.content.take(160),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            maxLines = 2
-                        )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                state = listState,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(messages, key = { it.id }) { msg ->
+                    when (msg.kind) {
+                        "tool" -> {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        "工具结果",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        msg.content.take(300),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        "reply" -> {
+                            val isStreaming = msg.id == streamingId
+                            val displayText = if (isStreaming) msg.content.take(streamTick) else msg.content
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Outlined.Bolt,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            msg.model ?: "AgentT",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    MarkdownText(
+                                        text = displayText,
+                                        modifier = Modifier.widthIn(max = 600.dp)
+                                    )
+                                    if (isStreaming && streamTick < msg.content.length) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(top = 4.dp)
+                                                .size(8.dp, 16.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.primary,
+                                                    RoundedCornerShape(2.dp)
+                                                )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        else -> {
+                            // user message
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Outlined.Face,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "你",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        msg.content,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

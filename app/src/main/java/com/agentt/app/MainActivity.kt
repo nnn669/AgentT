@@ -25,6 +25,7 @@ import com.agentt.app.ui.browser.BrowserScreen
 import com.agentt.app.ui.chat.ChatScreen
 import com.agentt.app.ui.chat.ChatStore
 import com.agentt.app.ui.chat.createChatSession
+import com.agentt.app.ui.files.FileBrowserScreen
 import com.agentt.app.ui.memory.MemoryScreen
 import com.agentt.app.ui.providers.ProvidersScreen
 import com.agentt.app.ui.settings.SandboxEnvironmentScreen
@@ -35,7 +36,7 @@ import com.agentt.app.ui.web.WebTools
 import com.agentt.app.ui.workspace.WorkspaceScreen
 import kotlinx.coroutines.launch
 
-enum class Screen { Workspace, Chat, Providers, SandboxEnvironment, Browser, Terminal, Assistants, AssistantEdit, TagManager, Memory }
+enum class Screen { Workspace, Chat, Providers, SandboxEnvironment, Browser, Terminal, Assistants, AssistantEdit, TagManager, Memory, FileBrowser }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
                             onOpenSandboxEnvironment = { screen = Screen.SandboxEnvironment },
                             onOpenAssistants = { screen = Screen.Assistants },
                             onOpenMemory = { screen = Screen.Memory },
+                            onOpenFileBrowser = { screen = Screen.FileBrowser },
                             onOpenChat = { id, title -> openChat(id, title) },
                             onNewChat = {
                                 val session = createChatSession(ChatStore.from(this@MainActivity))
@@ -107,6 +109,9 @@ class MainActivity : ComponentActivity() {
                         Screen.Memory -> MemoryScreen(
                             onBack = { screen = Screen.Workspace }
                         )
+                        Screen.FileBrowser -> FileBrowserScreen(
+                            onBack = { screen = Screen.Workspace }
+                        )
                     }
                 }
             }
@@ -123,6 +128,7 @@ fun AppRoot(
     onOpenSandboxEnvironment: () -> Unit,
     onOpenAssistants: () -> Unit,
     onOpenMemory: () -> Unit = {},
+    onOpenFileBrowser: () -> Unit = {},
     onOpenChat: (String, String) -> Unit,
     onNewChat: () -> Unit
 ) {
@@ -149,6 +155,10 @@ fun AppRoot(
                 onOpenMemory = {
                     scope.launch { drawerState.close() }
                     onOpenMemory()
+                },
+                onOpenFileBrowser = {
+                    scope.launch { drawerState.close() }
+                    onOpenFileBrowser()
                 }
             )
         }

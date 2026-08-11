@@ -1,6 +1,7 @@
 package com.agentt.app.ui.files
 
 import android.content.Context
+import android.os.Environment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -11,13 +12,15 @@ import java.util.Locale
 object FileTools {
     private const val MAX_READ_CHARS = 50_000
     private const val MAX_LIST_ITEMS = 200
+    private const val MAX_WRITE_SIZE = 500_000
 
-    /** 获取文件工具可访问的根目录 */
+    /** 获取文件工具可访问的根目录 - 用户可见存储 */
     fun getBaseDir(context: Context): File {
-        // 优先使用外部存储目录，回退到内部 files 目录
-        return context.getExternalFilesDir(null)?.parentFile
-            ?: context.filesDir.parentFile
-            ?: File("/storage/emulated/0")
+        return if (Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED) {
+            Environment.getExternalStorageDirectory()
+        } else {
+            context.filesDir.parentFile ?: File("/storage/emulated/0")
+        }
     }
 
     /** 安全解析路径，防止路径穿越 */
@@ -25,7 +28,6 @@ object FileTools {
         val clean = path.trimStart('/').trim()
         if (clean.isBlank()) return baseDir
         val target = File(baseDir, clean).normalize().absoluteFile
-        // 防止路径穿越到 baseDir 之外
         return if (target.absolutePath.startsWith(baseDir.absolutePath)) target else null
     }
 
@@ -34,7 +36,7 @@ object FileTools {
         val dir = resolvePath(baseDir, path) ?: return@withContext "路径无效或越界"
         if (!dir.isDirectory) return@withContext "不是目录"
         val files = dir.listFiles()?.sortedWith(compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() })
-            ?: return@withContext "无法读取目录"
+            ?: return@withContext "无法读取目录（可能需要存储权限）"
         val sb = StringBuilder()
         sb.appendLine("目录: ${dir.absolutePath}")
         sb.appendLine("总数: ${files.size} 项")
@@ -72,13 +74,62 @@ object FileTools {
 
     /** 写入文本文件 */
     suspend fun write(baseDir: File, path: String, content: String): String = withContext(Dispatchers.IO) {
+        if (content.length > MAX_WRITE_SIZE) return@withContext "内容过长（最大 ${formatSize(MAX_WRITE_SIZE.toLong())}）"
         val file = resolvePath(baseDir, path) ?: return@withContext "路径无效或越界"
         try {
             file.parentFile?.mkdirs()
             file.writeText(content, Charsets.UTF_8)
             "已写入 ${file.absolutePath} (${formatSize(file.length())})"
+        } catch (e: SecurityException) {
+            "写入失败：无权限访问此路径"
         } catch (e: Exception) {
             "写入失败: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /** 追加内容到文件 */
+    suspend fun append(baseDir: File, path: String, content: String): String = withContext(Dispatchers.IO) {
+        val file = resolvePath(baseDir, path) ?: return@withContext "路径无效或越界"
+        try {
+            file.parentFile?.mkdirs()
+            val existed = file.exists()
+            file.appendText(content, Charsets.UTF_8)
+            if (existed) "已追加到 ${file.name} (${formatSize(file.length())})"
+            else "已创建并写入 ${file.name} (${formatSize(file.length())})"
+        } catch (e: SecurityException) {
+            "追加失败：无权限访问此路径"
+        } catch (e: Exception) {
+            "追加失败: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /** 复制文件 */
+    suspend fun copy(baseDir: File, source: String, target: String): String = withContext(Dispatchers.IO) {
+        val src = resolvePath(baseDir, source) ?: return@withContext "源路径无效或越界"
+        val dst = resolvePath(baseDir, target) ?: return@withContext "目标路径无效或越界"
+        if (!src.exists()) return@withContext "源文件不存在"
+        if (!src.isFile) return@withContext "只能复制文件"
+        try {
+            dst.parentFile?.mkdirs()
+            src.copyTo(dst, overwrite = true)
+            "已复制到 ${dst.absolutePath} (${formatSize(dst.length())})"
+        } catch (e: Exception) {
+            "复制失败: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /** 移动/重命名文件 */
+    suspend fun move(baseDir: File, source: String, target: String): String = withContext(Dispatchers.IO) {
+        val src = resolvePath(baseDir, source) ?: return@withContext "源路径无效或越界"
+        val dst = resolvePath(baseDir, target) ?: return@withContext "目标路径无效或越界"
+        if (!src.exists()) return@withContext "源文件不存在"
+        try {
+            dst.parentFile?.mkdirs()
+            src.renameTo(dst)
+            if (dst.exists()) "已移动到 ${dst.absolutePath}"
+            else "移动失败：目标路径可能跨存储设备"
+        } catch (e: Exception) {
+            "移动失败: ${e.message ?: e.javaClass.simpleName}"
         }
     }
 
