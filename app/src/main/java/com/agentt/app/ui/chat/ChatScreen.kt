@@ -231,17 +231,38 @@ fun ChatScreen(
         persist()
     }
 
-    suspend fun runAgent(provider: ProviderConfig) {
+    suspend fun runAgent(providers: List<ProviderConfig>) {
+        var candidates = providers
         val toolResults = mutableListOf<String>()
         repeat(MAX_AGENT_STEPS) {
-            val reply = chatWithProvider(provider, buildAgentHistory(messages.toList(), toolResults))
-            if (!reply.ok) {
-                addReply("⚠️ 调用失败：${reply.error}", provider.mainModel)
+            val failedAttempts = mutableListOf<RecoveryAttempt>()
+            val recovery = recoverChatWithProviders(
+                providers = candidates,
+                history = buildAgentHistory(messages.toList(), toolResults),
+                onAttempt = { attempt ->
+                    if (attempt.error != null) failedAttempts += attempt
+                    loadingLabel = when {
+                        attempt.error != null -> "正在切换可用模型"
+                        attempt.attempt > 1 -> "正在重试 ${attempt.model}"
+                        else -> "调用 ${attempt.model}"
+                    }
+                }
+            )
+            if (recovery == null) {
+                addReply(recoveryFailureMessage(failedAttempts), providers.firstOrNull()?.mainModel)
                 return
             }
-            val actions = parseActionStream(reply.content)
+
+            val provider = recovery.provider
+            val original = providers.firstOrNull { it.id == provider.id }
+            val preferred = original?.copy(
+                models = listOf(recovery.model) + original.models.filterNot { it == recovery.model }
+            ) ?: provider
+            candidates = listOf(preferred) + providers.filterNot { it.id == preferred.id }
+
+            val actions = parseActionStream(recovery.reply.content)
             if (actions == null || actions.isEmpty()) {
-                addReply(reply.content, provider.mainModel)
+                addReply(recovery.reply.content, recovery.model)
                 return
             }
             var done = false
@@ -249,7 +270,7 @@ fun ChatScreen(
                 when (a.type) {
                     "think" -> {
                         loadingLabel = "分析问题"
-                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, provider.mainModel, "think"))
+                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, recovery.model, "think"))
                         persist()
                     }
                     "browser" -> {
@@ -259,7 +280,7 @@ fun ChatScreen(
                             ChatMessage(
                                 UUID.randomUUID().toString(), "assistant",
                                 "${a.tool}(${a.url ?: a.query})\n${summary.take(1500)}",
-                                provider.mainModel, "tool"
+                                recovery.model, "tool"
                             )
                         )
                         toolResults.add("[工具 ${a.tool}(${a.url ?: a.query}) 结果]\n${summary.take(3000)}")
@@ -268,14 +289,14 @@ fun ChatScreen(
                     }
                     "reply" -> {
                         loadingLabel = "整理回答"
-                        addReply(a.content, provider.mainModel)
+                        addReply(a.content, recovery.model)
                         done = true
                     }
                 }
             }
             if (done) return
         }
-        addReply("已达到最大执行步数（$MAX_AGENT_STEPS），请把问题拆小后重试。", provider.mainModel)
+        addReply("已达到最大执行步数（$MAX_AGENT_STEPS），请把问题拆小后重试。", candidates.firstOrNull()?.mainModel)
     }
 
     fun send() {
@@ -287,13 +308,13 @@ fun ChatScreen(
         loading = true
         loadingLabel = "分析问题"
         scope.launch {
-            val provider = providerStore.load().firstOrNull()
-            if (provider == null) {
+            val providers = providerStore.load()
+            if (providers.isEmpty()) {
                 addReply("尚未配置供应商：请到 设置 → 供应商 添加并测试连接后，再开始对话。", null)
                 loading = false
                 return@launch
             }
-            runAgent(provider)
+            runAgent(providers)
             loading = false
         }
     }
