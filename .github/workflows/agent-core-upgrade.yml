@@ -23,20 +23,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Make tool-branch patch structural
+      - name: Correct patch script output variable
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('.github/scripts/agent_core_upgrade.py')
           text = p.read_text(encoding='utf-8')
-          old = "if old not in text: raise RuntimeError('tool branch patch failed')\ntext = text.replace(old, new, 1)"
-          new = '''branch_start = text.find('                    "browser" -> {')
-          branch_end = text.find('                    "reply" -> {', branch_start)
-          if branch_start < 0 or branch_end < 0: raise RuntimeError('tool branch boundaries missing')
-          text = text[:branch_start] + new + "\\n" + text[branch_end:]'''
+          old = "chat.write_text(text, encoding='utf-8')"
           if old not in text:
-              raise RuntimeError('patch-script tool replacement block missing')
-          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+              raise RuntimeError('patch script output anchor missing')
+          p.write_text(text.replace(old, "p.write_text(text, encoding='utf-8')", 1), encoding='utf-8')
           PY
       - name: Apply autonomous agent runtime upgrade
         run: python3 .github/scripts/agent_core_upgrade.py
