@@ -200,6 +200,7 @@ fun ChatScreen(
     val messages = remember { mutableStateListOf<ChatMessage>() }
     var input by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    var loadingLabel by remember { mutableStateOf("分析问题") }
     var menuExpanded by remember { mutableStateOf(false) }
     var streamingId by remember { mutableStateOf<String?>(null) }
     var streamTick by remember { mutableStateOf(0) }
@@ -210,6 +211,7 @@ fun ChatScreen(
         messages.clear()
         if (sessionId != null) messages.addAll(chatStore.loadMessages(sessionId))
         loading = false
+        loadingLabel = "分析问题"
     }
 
     // Auto-follow: scroll to the newest message when the list grows or the
@@ -246,10 +248,12 @@ fun ChatScreen(
             for (a in actions) {
                 when (a.type) {
                     "think" -> {
+                        loadingLabel = "分析问题"
                         messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, provider.mainModel, "think"))
                         persist()
                     }
                     "browser" -> {
+                        loadingLabel = toolActionLabel(a.tool)
                         val summary = WebTools.runTool(a.tool, a.url, a.query)
                         messages.add(
                             ChatMessage(
@@ -263,6 +267,7 @@ fun ChatScreen(
                         persist()
                     }
                     "reply" -> {
+                        loadingLabel = "整理回答"
                         addReply(a.content, provider.mainModel)
                         done = true
                     }
@@ -280,6 +285,7 @@ fun ChatScreen(
         messages.add(ChatMessage(UUID.randomUUID().toString(), "user", text))
         persist()
         loading = true
+        loadingLabel = "分析问题"
         scope.launch {
             val provider = providerStore.load().firstOrNull()
             if (provider == null) {
@@ -300,7 +306,7 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        Text("Agent 助手", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("AgentT 助手", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 navigationIcon = {
@@ -354,7 +360,7 @@ fun ChatScreen(
                     Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f))
                     Spacer(Modifier.height(18.dp))
                     Text(
-                        "你好，我是你的 Agent 助手\n在下方输入消息开始对话",
+                        "你好，我是 AgentT\n在下方输入消息开始对话",
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f)
@@ -381,7 +387,7 @@ fun ChatScreen(
                         )
                     }
                 }
-                if (loading) item { AgentThinking() }
+                if (loading) item { AgentThinking(loadingLabel) }
             }
         }
     }
@@ -447,7 +453,7 @@ private fun AgentCard(
                 }
                 Spacer(Modifier.width(8.dp))
                 Column {
-                    Text("Agent", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("AgentT", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     model?.let {
                         Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
@@ -481,7 +487,7 @@ private fun ThinkCard(content: String) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Bolt, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(6.dp))
-                Text("思考", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text("分析问题", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(6.dp))
             Text(content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -491,6 +497,10 @@ private fun ThinkCard(content: String) {
 
 @Composable
 private fun ToolCard(content: String) {
+    val call = content.substringBefore('\n')
+    val tool = call.substringBefore('(')
+    val target = call.substringAfter('(', "").substringBeforeLast(')', "")
+    val result = content.substringAfter('\n', "")
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -500,16 +510,31 @@ private fun ToolCard(content: String) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(6.dp))
-                Text("网页工具", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text(toolActionLabel(tool), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
-            Spacer(Modifier.height(6.dp))
-            Text(content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (target.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(target, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+            if (result.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(result, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
 
+private fun toolActionLabel(tool: String): String = when (tool.lowercase()) {
+    "search" -> "搜索网页"
+    "extract" -> "读取网页正文"
+    "title" -> "获取网页标题"
+    "links" -> "提取网页链接"
+    "open" -> "打开网页"
+    else -> "执行网页操作"
+}
+
 @Composable
-private fun AgentThinking() {
+private fun AgentThinking(label: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -524,7 +549,7 @@ private fun AgentThinking() {
                 Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
             }
             Spacer(Modifier.width(10.dp))
-            Text("Agent 正在执行动作流…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -550,7 +575,7 @@ private fun ChatInputBar(
             enabled = enabled,
             modifier = Modifier.weight(1f),
             placeholder = {
-                Text("给 Agent 发送消息…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("给 AgentT 发送消息…", color = MaterialTheme.colorScheme.onSurfaceVariant)
             },
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
             singleLine = true,
