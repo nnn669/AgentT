@@ -1,5 +1,6 @@
 package com.agentt.app.ui.assistant
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -135,60 +136,85 @@ fun AssistantEditScreen(
                     OutlinedTextField(
                         value = systemPrompt,
                         onValueChange = { systemPrompt = it },
-                        label = { Text("提示词") },
+                        label = { Text("系统提示词") },
                         modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
                         maxLines = 10,
-                        placeholder = { Text("自定义系统提示词，留空使用默认") }
+                        placeholder = { Text("例如：你是一个有用的助手...") }
                     )
                 }
             }
 
             Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SectionTitle("模型配置")
-                    SettingClickableRow(
-                        icon = Icons.Outlined.Dns,
-                        title = "供应商",
-                        subtitle = selectedProvider?.name ?: "使用全局默认"
-                    ) { showProviderPicker = true }
-
-                    if (selectedProvider != null) {
-                        SettingClickableRow(
-                            icon = Icons.Outlined.SmartToy,
-                            title = "模型",
-                            subtitle = modelId.ifBlank { "使用全局默认" }
-                        ) { showModelPicker = true }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.weight(1f)) {
-                            Text("流式输出", style = MaterialTheme.typography.bodyLarge)
-                            Text("逐字输出回复", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    SectionTitle("模型设置")
+                    Surface(
+                        onClick = { showProviderPicker = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Dns, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("供应商", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    selectedProvider?.name ?: "使用全局默认",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(checked = streamOutput, onCheckedChange = { streamOutput = it })
                     }
-
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.weight(1f)) {
-                            Text("联网搜索", style = MaterialTheme.typography.bodyLarge)
-                            Text("允许助手搜索互联网", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (providerId.isNotBlank()) {
+                        Surface(
+                            onClick = { showModelPicker = true },
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.SmartToy, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("模型", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        modelId.ifBlank { "未选择" },
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
-                        Switch(checked = searchEnabled, onCheckedChange = { searchEnabled = it })
                     }
-                }
-            }
-
-            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SectionTitle("高级设置")
                     OutlinedTextField(
                         value = contextSize,
                         onValueChange = { contextSize = it },
                         label = { Text("上下文消息数 (1-1024)") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        supportingText = { Text("包含在上下文中的历史消息数") }
+                        modifier = Modifier.fillMaxWidth()
                     )
+                }
+            }
+
+            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionTitle("行为选项")
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("流式输出", style = MaterialTheme.typography.bodyLarge)
+                            Text("逐字显示模型回复", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = streamOutput, onCheckedChange = { streamOutput = it })
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("联网搜索", style = MaterialTheme.typography.bodyLarge)
+                            Text("允许助手搜索网络", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = searchEnabled, onCheckedChange = { searchEnabled = it })
+                    }
                 }
             }
 
@@ -234,9 +260,9 @@ fun AssistantEditScreen(
                             Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(p.name, style = MaterialTheme.typography.bodyLarge)
-                                    Text(p.baseUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(p.baseUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                 }
-                                if (p.id == providerId) Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                if (providerId == p.id) Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                         Spacer(Modifier.height(4.dp))
@@ -247,35 +273,32 @@ fun AssistantEditScreen(
         )
     }
 
-    if (showModelPicker && selectedProvider != null) {
+    if (showModelPicker) {
+        val provider = providers.firstOrNull { it.id == providerId }
         AlertDialog(
             onDismissRequest = { showModelPicker = false },
             title = { Text("选择模型") },
             text = {
                 Column {
-                    Surface(
-                        onClick = { modelId = ""; showModelPicker = false },
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                    ) {
-                        Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("使用默认模型", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                            if (modelId == "") Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    selectedProvider.models.forEach { m ->
-                        Surface(
-                            onClick = { modelId = m; showModelPicker = false },
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                        ) {
-                            Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(m, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                                if (m == modelId) Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    if (provider != null) {
+                        val models = provider.models
+                        if (models.isEmpty()) {
+                            Text("该供应商没有可用模型", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            models.forEach { m ->
+                                Surface(
+                                    onClick = { modelId = m; showModelPicker = false },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                ) {
+                                    Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(m, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                                        if (modelId == m) Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                                Spacer(Modifier.height(4.dp))
                             }
                         }
-                        Spacer(Modifier.height(4.dp))
                     }
                 }
             },
@@ -284,61 +307,39 @@ fun AssistantEditScreen(
     }
 
     if (showAvatarPicker) {
-        var emojiInput by remember { mutableStateOf(avatar) }
+        val emojis = listOf("🤖", "👤", "🌟", "🎯", "💡", "⚡", "🔥", "🌈", "🎨", "🚀", "🦊", "🐱", "🐶", "🦄", "🌸", "🍀")
         AlertDialog(
             onDismissRequest = { showAvatarPicker = false },
-            title = { Text("设置图标") },
+            title = { Text("选择图标") },
             text = {
                 Column {
-                    Text("输入一个 Emoji 作为图标，留空使用首字母", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = emojiInput,
-                        onValueChange = { emojiInput = it.take(1) },
-                        label = { Text("Emoji 或字母") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (emojiInput.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Text(emojiInput, style = MaterialTheme.typography.headlineLarge)
+                    emojis.chunked(4).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            row.forEach { emoji ->
+                                Surface(
+                                    onClick = { avatar = emoji; showAvatarPicker = false },
+                                    shape = CircleShape,
+                                    color = if (avatar == emoji) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                ) {
+                                    Text(emoji, modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.headlineSmall)
+                                }
+                            }
                         }
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    avatar = emojiInput
-                    showAvatarPicker = false
-                }) { Text("确定") }
-            },
-            dismissButton = { TextButton(onClick = { showAvatarPicker = false }) { Text("取消") } }
+            confirmButton = { TextButton(onClick = { showAvatarPicker = false }) { Text("取消") } }
         )
     }
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-}
-
-@Composable
-private fun SettingClickableRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
-    Surface(onClick = onClick, color = Color.Transparent, shape = RoundedCornerShape(10.dp)) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
-        }
-    }
+private fun SectionTitle(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.SemiBold
+    )
 }
