@@ -168,7 +168,7 @@ private fun chatGemini(p: ProviderConfig, history: List<ChatMessage>): String {
 private fun chatOllama(p: ProviderConfig, history: List<ChatMessage>): String {
     val r = httpJson(
         "POST", p.baseUrl.trimEnd('/') + "/api/chat",
-        emptyMap(),
+        mapOf<String, String>(),
         JSONObject().put("model", p.mainModel).put("stream", false).put("messages", chatMessages(history))
     )
     if (r.code !in 200..299) throw RuntimeException("HTTP ${r.code}：${r.body.take(160)}")
@@ -181,46 +181,14 @@ data class ChatMessage(
     val role: String,
     val content: String,
     val model: String? = null,
-    val kind: String = if (role == "user") "text" else "reply"
+    val kind: String = "text"
 )
-
-data class Action(
-    val type: String,
-    val tool: String = "",
-    val url: String? = null,
-    val query: String? = null,
-    val content: String = "",
-    val requirement: String = ""
-)
-
-fun parseActionStream(raw: String): List<Action>? {
-    try {
-        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-        val obj = JSONObject(cleaned)
-        val arr = obj.optJSONArray("actions") ?: return null
-        val result = mutableListOf<Action>()
-        for (i in 0 until arr.length()) {
-            val a = arr.getJSONObject(i)
-            result.add(Action(
-                type = a.optString("type", ""),
-                tool = a.optString("tool", ""),
-                url = a.optString("url", null).ifBlank { null },
-                query = a.optString("query", null).ifBlank { null },
-                content = a.optString("content", ""),
-                requirement = a.optString("requirement", "")
-            ))
-        }
-        return result
-    } catch (_: Exception) {
-        return null
-    }
-}
 
 data class RecoveryAttempt(
     val provider: String,
     val model: String,
-    val error: String? = null,
-    val attempt: Int = 1
+    val attempt: Int,
+    val error: String? = null
 )
 
 data class RecoveryResult(
@@ -229,12 +197,42 @@ data class RecoveryResult(
     val reply: ChatMessage
 )
 
+data class Action(
+    val type: String,
+    val tool: String? = null,
+    val url: String? = null,
+    val query: String? = null,
+    val path: String? = null,
+    val content: String? = null,
+    val payload: String? = null
+)
+
+fun parseActionStream(json: String): List<Action>? = runCatching {
+    val o = JSONObject(json)
+    val arr = o.optJSONArray("actions") ?: return@runCatching null
+    buildList {
+        for (i in 0 until arr.length()) {
+            val a = arr.getJSONObject(i)
+            add(Action(
+                type = a.optString("type"),
+                tool = a.optString("tool", null),
+                url = a.optString("url", null),
+                query = a.optString("query", null),
+                path = a.optString("path", null),
+                content = a.optString("content", null),
+                payload = a.optString("payload", null)
+            ))
+        }
+    }
+}.getOrNull()
+
 suspend fun recoverChatWithProviders(
     providers: List<ProviderConfig>,
     history: List<ChatMessage>,
     onAttempt: (RecoveryAttempt) -> Unit = {}
 ): RecoveryResult? {
     for (provider in providers) {
+        if (provider.models.isEmpty()) continue
         val preferred = provider.models.firstOrNull() ?: provider.mainModel
         var lastError: String? = null
         for (attempt in 1..3) {
@@ -244,7 +242,7 @@ suspend fun recoverChatWithProviders(
                 attempt = attempt
             )
             val modelToUse = if (attempt == 1) preferred else provider.models.getOrNull(attempt - 1) ?: preferred
-            val p = provider.copy(mainModel = modelToUse, models = provider.models.filter { it != preferred } + preferred)
+            val p = provider.copy(models = listOf(modelToUse) + provider.models.filter { it != modelToUse })
             onAttempt(attemptInfo.copy(error = null))
             val result = chatWithProvider(p, listOf(ChatMessage("sys", "system", SYSTEM_PROMPT)) + history)
             if (result.ok) {
@@ -320,9 +318,14 @@ object TerminalAgentTool {
         val b = backend ?: return@withContext "终端后端不可用"
         outputBuffer.clear()
         try {
-            b.writeInput(command + "\n")
-            delay(2000)
-            val output = b.readOutput().take(3000)
+            val request = com.agentt.app.ui.terminal.TerminalRequest(
+                sessionId = UUID.randomUUID().toString(),
+                command = command,
+                timeoutMs = 30_000,
+                maxOutputChars = 256_000
+            )
+            val result = b.execute(request)
+            val output = (result.stdout + "\n" + result.stderr).trim().take(3000)
             if (output.isBlank()) "命令已执行，无输出" else output
         } catch (e: Exception) {
             "命令执行失败: ${e.message}"
@@ -360,8 +363,8 @@ fun ChatScreen(
     onOpenTerminal: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val chatStore = remember { ChatStore(context) }
-    val providerStore = remember { ProviderStore(context) }
+    val chatStore = remember { ChatStore.from(context) }
+    val providerStore = remember { ProviderStore.from(context) }
     val scope = rememberCoroutineScope()
     var input by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
@@ -450,74 +453,106 @@ fun ChatScreen(
                 when (a.type) {
                     "think" -> {
                         loadingLabel = "分析问题"
-                        messages.add(ChatMessage(UUID.randomUUID().toString(), "assistant", a.content, recovery.model, "think"))
-                        persist()
                     }
-                    "browser" -> {
-                        loadingLabel = AgentToolRegistry.actionLabel(a.tool)
-                        val summary = WebTools.runTool(a.tool, a.url, a.query)
-                        messages.add(
-                            ChatMessage(
-                                UUID.randomUUID().toString(), "assistant",
-                                "${a.tool}(${a.url ?: a.query})\n${summary.take(1500)}",
-                                recovery.model, "tool"
-                            )
-                        )
-                        toolResults.add("[工具 ${a.tool}(${a.url ?: a.query}) 结果]\n${summary.take(3000)}")
-                        if (a.tool == "open" && a.url != null) onOpenBrowser(a.url)
-                        persist()
-                    }
-                    "file" -> {
-                        loadingLabel = AgentToolRegistry.actionLabel(a.tool)
-                        val toolId = AgentToolRegistry.canonicalId(a.tool)
-                        val path = a.url ?: a.query ?: ""
-                        val summary = withContext(Dispatchers.IO) {
-                            when (toolId) {
-                                "file.list" -> fileTools.list(fileBaseDir, path)
-                                "file.read" -> fileTools.read(fileBaseDir, path)
-                                "file.write" -> {
-                                    val content = a.content.ifBlank { a.requirement }
-                                    fileTools.write(fileBaseDir, path, content)
-                                }
-                                "file.stat" -> fileTools.stat(fileBaseDir, path)
-                                "file.delete" -> fileTools.delete(fileBaseDir, path)
-                                else -> "未知文件工具: ${a.tool}"
-                            }
+                    "tool" -> {
+                        val toolName = a.tool ?: continue
+                        loadingLabel = when {
+                            toolName.startsWith("browser.") -> "浏览网页"
+                            toolName.startsWith("file.") -> "操作文件"
+                            toolName.startsWith("terminal.") -> "执行命令"
+                            else -> "执行工具"
                         }
-                        messages.add(
-                            ChatMessage(
-                                UUID.randomUUID().toString(), "assistant",
-                                "${a.tool}($path)\n${summary.take(1500)}",
+                        try {
+                            var result = when {
+                                toolName.startsWith("browser.") -> when (toolName.removePrefix("browser.")) {
+                                    "extract" -> WebTools.extract(a.url.orEmpty())
+                                    "title" -> WebTools.title(a.url.orEmpty())
+                                    "links" -> WebTools.links(a.url.orEmpty())
+                                    "search" -> WebTools.search(a.query.orEmpty())
+                                    "open" -> {
+                                        val url = a.url ?: a.query ?: ""
+                                        if (url.isNotBlank()) {
+                                            kotlinx.coroutines.runBlocking {
+                                                onOpenBrowser(url)
+                                            }
+                                        }
+                                        "已在浏览器中打开：$url"
+                                    }
+                                    else -> null
+                                }
+                                toolName.startsWith("file.") -> when (toolName.removePrefix("file.")) {
+                                    "list" -> {
+                                        val path = a.path ?: a.url ?: fileBaseDir
+                                        FileTools.listFiles(context, path)
+                                    }
+                                    "read" -> {
+                                        val path = a.path ?: a.url ?: ""
+                                        if (path.isBlank()) "文件路径为空" else FileTools.readFile(context, path)
+                                    }
+                                    "write" -> {
+                                        val path = a.path ?: ""
+                                        val content = a.content ?: ""
+                                        if (path.isBlank()) "文件路径为空" else FileTools.writeFile(context, path, content)
+                                    }
+                                    "stat" -> {
+                                        val path = a.path ?: a.url ?: ""
+                                        if (path.isBlank()) "文件路径为空" else FileTools.statFile(context, path)
+                                    }
+                                    "delete" -> {
+                                        val path = a.path ?: a.url ?: ""
+                                        if (path.isBlank()) "文件路径为空" else FileTools.deleteFile(context, path)
+                                    }
+                                    else -> null
+                                }
+                                toolName.startsWith("terminal.") || toolName == "terminal.exec" -> {
+                                    TerminalAgentTool.executeCommand(a.payload ?: a.content ?: a.query.orEmpty())
+                                }
+                                else -> null
+                            }
+                            if (result == null) {
+                                result = "未知工具：$toolName"
+                            }
+                            toolResults.add("[$toolName]\n${result.take(10000)}")
+                            messages.add(ChatMessage(
+                                UUID.randomUUID().toString(), "tool", result.take(2000),
                                 recovery.model, "tool"
-                            )
-                        )
-                        toolResults.add("[工具 ${a.tool}($path) 结果]\n${summary.take(3000)}")
-                        persist()
+                            ))
+                            persist()
+                        } catch (e: Exception) {
+                            val err = "工具执行失败：${e.message ?: e.javaClass.simpleName}"
+                            toolResults.add("[$toolName]\n$err")
+                            messages.add(ChatMessage(
+                                UUID.randomUUID().toString(), "tool", err,
+                                recovery.model, "tool"
+                            ))
+                            persist()
+                        }
                     }
                     "reply" -> {
-                        loadingLabel = "整理回答"
-                        addReply(a.content, recovery.model)
+                        addReply(a.content ?: recovery.reply.content, recovery.model)
                         done = true
+                        return@repeat
                     }
                 }
             }
             if (done) return
         }
-        addReply("已达到最大执行步数（$MAX_AGENT_STEPS），请把问题拆小后重试。", candidates.firstOrNull()?.mainModel)
+        addReply("已达到最大推理步数（$MAX_AGENT_STEPS），可能未完成任务。", providers.firstOrNull()?.mainModel)
     }
 
     fun send() {
         val text = input.trim()
-        if (text.isEmpty() || loading) return
+        if (text.isBlank() || loading) return
         input = ""
-        messages.add(ChatMessage(UUID.randomUUID().toString(), "user", text))
+        val userMsg = ChatMessage(UUID.randomUUID().toString(), "user", text)
+        messages.add(userMsg)
         persist()
         loading = true
         loadingLabel = "分析问题"
         scope.launch {
             val providers = providerStore.load()
             if (providers.isEmpty()) {
-                addReply("尚未配置供应商：请到 设置 → 供应商 添加并测试连接后，再开始对话。", null)
+                addReply("请先在设置中添加供应商（如 OpenAI）和模型。", null)
                 loading = false
                 return@launch
             }
@@ -722,34 +757,14 @@ private fun MessageBubble(
                     color = bubbleColor,
                     border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        if (isStreaming) {
-                            val displayText = msg.content.substring(0, minOf(msg.content.length, streamTick))
-                            MarkdownText(
-                                markdown = displayText,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        } else {
-                            MarkdownText(
-                                markdown = msg.content,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        if (isStreaming && streamTick < msg.content.length) {
-                            Spacer(Modifier.height(4.dp))
-                            val blinkAlpha = rememberInfiniteTransition("blink").animateFloat(
-                                initialValue = 1f, targetValue = 0.3f,
-                                animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse)
-                            )
-                            Text(
-                                "▌",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = blinkAlpha.value)
-                            )
-                        }
-                    }
+                    val displayText = if (isStreaming) msg.content.take(streamTick) else msg.content
+                    MarkdownText(
+                        text = displayText,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        onOpenUrl = { url -> onOpenBrowser(url) }
+                    )
                 }
             }
         }
@@ -766,7 +781,8 @@ private fun LoadingIndicator(label: String) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         val alpha = rememberInfiniteTransition("loading").animateFloat(
-            initialValue = 0.3f, targetValue = 1f,
+            initialValue = 0.3f,
+            targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse)
         )
         Box(
