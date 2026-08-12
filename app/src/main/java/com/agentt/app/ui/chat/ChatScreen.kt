@@ -207,7 +207,7 @@ private suspend fun recoverChatWithProviders(
             val modelToUse = if (attempt == 1) preferred else provider.models.getOrNull(attempt - 1) ?: preferred
             val p = provider.copy(models = listOf(modelToUse) + provider.models.filter { it != modelToUse })
             onAttempt(attemptInfo.copy(error = null))
-            val result = chatWithProvider(p, listOf(ChatMessage("sys", "system", systemPrompt)) + history)
+            val result = chatWithProviderReliable(p, history, systemPrompt)
             if (result.ok) {
                 val msg = ChatMessage(
                     UUID.randomUUID().toString(), "assistant", result.content,
@@ -217,15 +217,15 @@ private suspend fun recoverChatWithProviders(
             }
             lastError = result.error
             val isConfigError = result.error?.let { e ->
-                e.contains("401") || e.contains("403") || e.contains("40") ||
+                e.contains("401") || e.contains("403") ||
                     e.contains("API key") || e.contains("apikey") || e.contains("auth") ||
                     e.contains("not found") || e.contains("Not Found") || e.contains("404")
             } ?: false
             if (isConfigError) {
-                onAttempt(attemptInfo.copy(error = "配置错误，跳过此供应商"))
+                onAttempt(attemptInfo.copy(error = "配置错误：${result.error?.take(180) ?: "未知错误"}"))
                 break
             }
-            onAttempt(attemptInfo.copy(error = "请求失败，${provider.models.size - attempt}个备用模型可尝试"))
+            onAttempt(attemptInfo.copy(error = result.error?.take(180) ?: "请求失败"))
             if (attempt < 3) delay(1000L * attempt)
         }
     }
@@ -602,7 +602,7 @@ fun ChatScreen(
                 loading = false
                 return@launch
             }
-            runAgent(providers, systemPrompt)
+            runAgent(prioritizeAssistantModel(providers, assistant), systemPrompt)
             loading = false
         }
     }

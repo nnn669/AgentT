@@ -300,7 +300,7 @@ fun ProvidersScreen(onBack: () -> Unit) {
     fun runTest(p: ProviderConfig) {
         testingId = p.id
         scope.launch {
-            val r = testProviderApi(p)
+            val r = com.agentt.app.ui.chat.testProviderConversation(p)
             testResults[p.id] = r.message to r.ok
             testingId = null
         }
